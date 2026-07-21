@@ -1,0 +1,37 @@
+name: nepse-floorsheet
+
+on:
+  schedule:
+    # 09:25 UTC = 15:10 NPT (NPT = UTC+5:45). Sun-Thu only (NEPSE trading days).
+    # GitHub cron is best-effort and often runs a few minutes late at peak.
+    - cron: '25 9 * * 0,1,2,3,4'
+  workflow_dispatch:        # lets you run it manually from the Actions tab
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install selenium webdriver-manager beautifulsoup4 lxml pandas
+
+      - name: Run scraper and email
+        env:
+          GMAIL_USER:   ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PW: ${{ secrets.GMAIL_APP_PW }}
+          MAIL_TO:      ${{ secrets.MAIL_TO }}
+        run: python floorsheet_scrape_and_mail.py
