@@ -220,6 +220,30 @@ def scrape_all_pages(driver):
     return all_data
 
 
+def build_analysis_text(df):
+    lines = []
+
+    top_trades = df.nlargest(5, "Amount (Rs)")[["Stock Symbol", "Buyer", "Seller", "Quantity", "Rate (Rs)", "Amount (Rs)"]]
+    lines.append("Top 5 Largest Single Transactions (by Amount):")
+    for _, r in top_trades.iterrows():
+        lines.append(f"  {r['Stock Symbol']:<8} Qty {r['Quantity']:>8,} @ Rs {r['Rate (Rs)']:>10,.2f} = Rs {r['Amount (Rs)']:>14,.2f}")
+
+    by_turnover = df.groupby("Stock Symbol")["Amount (Rs)"].sum().nlargest(5)
+    lines.append("\nTop 5 Stocks by Turnover:")
+    for sym, amt in by_turnover.items():
+        lines.append(f"  {sym:<8} Rs {amt:,.2f}")
+
+    by_volume = df.groupby("Stock Symbol")["Quantity"].sum().nlargest(5)
+    lines.append("\nTop 5 Stocks by Volume:")
+    for sym, qty in by_volume.items():
+        lines.append(f"  {sym:<8} {qty:,} shares")
+
+    lines.append(f"\nUnique symbols traded: {df['Stock Symbol'].nunique()}")
+    lines.append(f"Average trade size: Rs {df['Amount (Rs)'].mean():,.2f}")
+
+    return "\n".join(lines)
+
+
 def send_mail(subject, body, attachment_path=None):
     if not (GMAIL_USER and GMAIL_APP_PW and MAIL_TO):
         print("Mail skipped: secrets not all set.")
@@ -295,6 +319,8 @@ def main():
     elapsed = datetime.now() - start_time
     diff = expected_amount - actual_amount
 
+    analysis_text = build_analysis_text(df) if status == "OK" else "Analysis unavailable (scrape did not complete successfully)."
+
     subject = f"[NEPSE Floorsheet {status}] {datetime.now():%Y-%m-%d} — {rows:,} rows"
     body = (
         f"Floorsheet scrape run (GitHub Actions): {datetime.now():%Y-%m-%d %H:%M:%S} UTC\n"
@@ -304,6 +330,7 @@ def main():
         f"Scraped turnover:  Rs {actual_amount:,.2f}\n"
         f"Difference:        Rs {diff:,.2f}\n"
         f"Run time:          {elapsed}\n"
+        f"\n{analysis_text}\n"
     )
     send_mail(subject, body, saved_path)
 
