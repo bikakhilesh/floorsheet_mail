@@ -2,9 +2,9 @@ name: nepse-floorsheet
 
 on:
   schedule:
-    # 09:25 UTC = 15:10 NPT (NPT = UTC+5:45). Sun-Thu only (NEPSE trading days).
+    # 09:25 UTC = 15:10 NPT (NPT = UTC+5:45). Mon-Fri only.
     # GitHub cron is best-effort and often runs a few minutes late at peak.
-    - cron: '25 9 * * 0,1,2,3,4'
+    - cron: '25 9 * * 1,2,3,4,5'
   workflow_dispatch:        # lets you run it manually from the Actions tab
 
 jobs:
@@ -31,7 +31,7 @@ jobs:
 
       - name: Run scraper and email
         env:
-          GMAIL_USER:   ${{ secrets.GMAIL_USER }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PW: ${{ secrets.GMAIL_APP_PW }}
-          MAIL_TO:      ${{ secrets.MAIL_TO }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
         run: python floorsheet_scrape_and_mail.py
