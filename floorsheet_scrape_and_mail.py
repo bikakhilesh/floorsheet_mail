@@ -241,6 +241,16 @@ def build_analysis_text(df):
     lines.append(f"\nUnique symbols traded: {df['Stock Symbol'].nunique()}")
     lines.append(f"Average trade size: Rs {df['Amount (Rs)'].mean():,.2f}")
 
+    top_buyers = df.groupby("Buyer")["Amount (Rs)"].sum().nlargest(5)
+    lines.append("\nTop 5 Buyer Broker Codes (by Amount):")
+    for broker, amt in top_buyers.items():
+        lines.append(f"  {broker:<8} Rs {amt:,.2f}")
+
+    top_sellers = df.groupby("Seller")["Amount (Rs)"].sum().nlargest(5)
+    lines.append("\nTop 5 Seller Broker Codes (by Amount):")
+    for broker, amt in top_sellers.items():
+        lines.append(f"  {broker:<8} Rs {amt:,.2f}")
+
     return "\n".join(lines)
 
 
