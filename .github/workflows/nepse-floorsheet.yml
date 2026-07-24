@@ -2,9 +2,9 @@ name: nepse-floorsheet
 
 on:
   schedule:
-    # 09:25 UTC = 15:10 NPT (NPT = UTC+5:45). Mon-Fri only.
+    # 09:15 UTC = 15:00 NPT (NPT = UTC+5:45). Mon-Fri only.
     # GitHub cron is best-effort and often runs a few minutes late at peak.
-    - cron: '25 9 * * 1,2,3,4,5'
+    - cron: '15 9 * * 1,2,3,4,5'
   workflow_dispatch:        # lets you run it manually from the Actions tab
 
 jobs:
