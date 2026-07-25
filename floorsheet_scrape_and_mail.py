@@ -223,10 +223,10 @@ def scrape_all_pages(driver):
 def build_analysis_text(df):
     lines = []
 
-        top_trades = df.nlargest(10, "Amount (Rs)")[["Stock Symbol", "Buyer", "Seller", "Quantity", "Rate (Rs)", "Amount (Rs)"]]
-        lines.append("Top 10 Largest Single Transactions (by Amount):")
-        for _, r in top_trades.iterrows():
-            lines.append(f"  {r['Stock Symbol']:<8} Buyer {r['Buyer']:<6} Seller {r['Seller']:<6} Qty {r['Quantity']:>8,} @ Rs {r['Rate (Rs)']:>10,.2f} = Rs {r['Amount (Rs)']:>14,.2f}")
+    top_trades = df.nlargest(10, "Amount (Rs)")[["Stock Symbol", "Buyer", "Seller", "Quantity", "Rate (Rs)", "Amount (Rs)"]]
+    lines.append("Top 10 Largest Single Transactions (by Amount):")
+    for _, r in top_trades.iterrows():
+        lines.append(f"  {r['Stock Symbol']:<8} Buyer {r['Buyer']:<6} Seller {r['Seller']:<6} Qty {r['Quantity']:>8,} @ Rs {r['Rate (Rs)']:>10,.2f} = Rs {r['Amount (Rs)']:>14,.2f}")
 
     by_turnover = df.groupby("Stock Symbol")["Amount (Rs)"].sum().nlargest(5)
     lines.append("\nTop 5 Stocks by Turnover:")
