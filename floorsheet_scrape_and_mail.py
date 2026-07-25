@@ -202,7 +202,7 @@ def scrape_all_pages(driver):
             new_page = driver.execute_script(JS_ACTIVE_PAGE)
             if new_page and old_page and new_page.isdigit() and old_page.isdigit():
                 jump = int(new_page) - int(old_page)
-                if jump != 1:
+                if jump not in (0, 1):
                     print(f"\nWARNING: pagination jumped from {old_page} to {new_page}.")
             page_no += 1
 
