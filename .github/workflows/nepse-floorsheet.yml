@@ -1,18 +1,39 @@
 name: nepse-floorsheet
 
+# One job, not two: floorsheet_scrape_and_mail.py writes the CSV to
+# tempfile.gettempdir(), which is wiped when the job ends, so nothing
+# downstream can read it. The scraper now writes into the workspace via
+# OUTPUT_DIR and the analytics, Pages publish and mail run off that file.
+#
+# Required one-line change in floorsheet_scrape_and_mail.py:
+#   OUTPUT_DIR = os.environ.get("OUTPUT_DIR", tempfile.gettempdir())
+#
+# MAIL_TO is deliberately withheld from the scraper step — it would send its own
+# plain-text mail and you would get two a day. The scrape step is allowed to
+# fail without stopping the job, so a MISMATCH (which still produces the best
+# available CSV) is analysed and mailed with the status in the subject; the job
+# is then failed at the end so GitHub still flags it.
+
 on:
   schedule:
-    # 09:15 UTC = 15:00 NPT (NPT = UTC+5:45). Mon-Fri only.
-    # GitHub cron is best-effort and often runs a few minutes late at peak.
-    - cron: '15 9 * * 1,2,3,4,5'
-  workflow_dispatch:        # lets you run it manually from the Actions tab
+    # 10:15 UTC = 16:00 NPT. NEPSE trades Sunday–Thursday (cron 0 = Sunday).
+    - cron: '15 10 * * 0,1,2,3,4'
+  workflow_dispatch:
+
+permissions:
+  contents: write        # force-push the gh-pages site
+
+concurrency:
+  group: floorsheet
+  cancel-in-progress: false
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    # Must exceed VERIFY_BUDGET_SEC in the script (3600s) plus one final
-    # scrape + email, with headroom. Script self-limits; this is the backstop.
-    timeout-minutes: 90
+    # Must exceed VERIFY_BUDGET_SEC in the script (3600s) plus one final scrape
+    # and email, with headroom for the analytics and publish steps.
+    timeout-minutes: 100
+
     steps:
       - uses: actions/checkout@v7
 
@@ -20,6 +41,7 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+          cache: pip
 
       - name: Install Chrome
         uses: browser-actions/setup-chrome@v2
@@ -29,11 +51,121 @@ jobs:
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
-          pip install selenium webdriver-manager beautifulsoup4 lxml pandas
+          pip install -r requirements.txt
 
-      - name: Run scraper and email
+      # continue-on-error so a MISMATCH still gets analysed and mailed.
+      - name: Scrape floor sheet
+        id: scrape
+        continue-on-error: true
+        env:
+          OUTPUT_DIR: ${{ github.workspace }}/data
+        run: |
+          mkdir -p data
+          python floorsheet_scrape_and_mail.py
+
+      - name: Resolve CSV
+        id: pick
+        if: always()
+        run: |
+          CSV=$(ls -1 data/*.csv 2>/dev/null | sort | tail -n 1 || true)
+          if [ -s "$CSV" ]; then
+            echo "csv=$CSV"   >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Using $CSV ($(( $(wc -l < "$CSV") - 1 )) rows)"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No CSV produced — skipping analytics."
+          fi
+
+      - name: Build interactive dashboard for the site
+        if: steps.pick.outputs.found == 'true'
+        run: |
+          mkdir -p site/reports
+          # Seed from the live site so the archive accumulates across days.
+          if git clone --depth 1 --branch gh-pages \
+               "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+               site_old 2>/dev/null; then
+            cp -r site_old/reports/. site/reports/ 2>/dev/null || true
+          else
+            echo "No gh-pages branch yet — starting a fresh site."
+          fi
+          python interactive_report.py \
+            --csv "${{ steps.pick.outputs.csv }}" \
+            --out site/reports --index site/index.html --keep 40
+          touch site/.nojekyll
+
+      - name: Publish to GitHub Pages
+        if: steps.pick.outputs.found == 'true'
+        run: |
+          set -euo pipefail
+          cd site
+          git init -q
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q --orphan main
+          git add -A
+          git commit -q -m "Floor sheet dashboards through $(date -u +%Y-%m-%d)"
+          # Orphan + force-push keeps the branch at a single commit, so the repo
+          # does not grow by ~0.3 MB of history every trading day.
+          git push -q --force \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+            main:gh-pages
+
+      - name: Build charts and send mail
+        if: steps.pick.outputs.found == 'true'
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PW: ${{ secrets.GMAIL_APP_PW }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
-        run: python floorsheet_scrape_and_mail.py
+          SCRAPE_STATUS: ${{ steps.scrape.outcome == 'success' && 'OK' || 'CHECK SCRAPE' }}
+          MPLBACKEND: Agg
+        run: |
+          python mail_floorsheet.py \
+            --csv "${{ steps.pick.outputs.csv }}" \
+            --outdir out --top 20 --dpi 120 \
+            --pages-url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+
+      - name: Upload analytics pack
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: floorsheet-analytics
+          path: |
+            out/charts/*.png
+            out/tables/*.csv
+            out/dashboard_*.html
+            out/floorsheet_*.html
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Fail the job if the scrape did not succeed
+        if: steps.scrape.outcome != 'success'
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PW: ${{ secrets.GMAIL_APP_PW }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          MAILED: ${{ steps.pick.outputs.found }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import os, ssl, smtplib
+          from email.message import EmailMessage
+          u, p = os.environ.get("GMAIL_USER"), os.environ.get("GMAIL_APP_PW")
+          to = [x.strip() for x in os.environ.get("MAIL_TO", "").split(",") if x.strip()]
+          if os.environ.get("MAILED") == "true":
+              print("Analytics mail already went out with the status flagged.")
+          elif u and p and to:
+              m = EmailMessage()
+              m["Subject"] = "[NEPSE Floorsheet FAILED] no floor sheet produced"
+              m["From"], m["To"] = u, ", ".join(to)
+              m.set_content("The scrape did not produce a CSV, so no analytics "
+                            "were generated.\n\n" + os.environ["RUN_URL"] + "\n")
+              with smtplib.SMTP_SSL("smtp.gmail.com", 465,
+                                    context=ssl.create_default_context()) as s:
+                  s.login(u, p)
+                  s.send_message(m)
+              print("Failure alert sent.")
+          else:
+              print("Alert skipped: mail secrets not set.")
+          PY
+          exit 1

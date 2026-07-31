@@ -43,7 +43,9 @@ MAX_VERIFY_ATTEMPTS = 20
 VERIFY_BUDGET_SEC = 3600
 TOLERANCE_ABS = 100.0
 TOLERANCE_REL = 1e-6
-OUTPUT_DIR = tempfile.gettempdir()      # runner temp; wiped after the job
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", tempfile.gettempdir())
+# Default is the runner temp dir (wiped after the job). The workflow points
+# OUTPUT_DIR at the workspace so the analytics steps can read the CSV.
 LIMIT = 500
 STABLE_POLL = 0.15
 STABLE_MAX_POLLS = 30

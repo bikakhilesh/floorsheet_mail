@@ -1,0 +1,6 @@
+data/
+out/
+site/
+site_old/
+__pycache__/
+*.pyc
