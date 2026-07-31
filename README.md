@@ -160,6 +160,33 @@ archive lives on a branch instead. `floorsheet_archive.py add` copies the file
 in and appends one manifest row — it only opens the new file, so the step stays
 constant-time as the archive grows.
 
+### Backfilling an existing dump
+
+```bash
+python floorsheet_archive.py ingest --src "/d/analysis/Floorsheet" \
+    --dir archive/parquet --manifest archive/manifest.csv --dry-run
+```
+
+Each file's session date comes from its **contract numbers**, so filenames need
+no convention — `2026.07.30.csv`, `floorsheet_2026-07-30.csv` and `dump_003.csv`
+all land correctly. `.csv`, `.csv.gz` and `.parquet` are read; `--recursive`
+walks sub-folders.
+
+A bad file is reported and skipped rather than killing the run. Two files
+claiming the same session keep the one with more rows, which is what you want
+when a dump holds both a partial and a complete capture of the same day.
+Re-running skips sessions already archived unless you pass `--overwrite`, so it
+is safe to repeat.
+
+Drop `--dry-run` to write, then push the result to the data branch:
+
+```bash
+cd archive
+git init && git checkout --orphan main && git add -A
+git commit -m "Backfill floor sheet archive"
+git push --force https://github.com/bikakhilesh/floorsheet_mail.git main:data
+```
+
 ### Pulling data back out
 
 ```bash

@@ -25,6 +25,7 @@ current file set once rather than accumulating a new copy of history each day.
 from __future__ import annotations
 
 import argparse
+import glob
 import os
 import shutil
 import sys
@@ -130,6 +131,89 @@ Clone it directly with `git clone --branch data --depth 1 {repo or '<repo-url>'}
     with open(out, "w", encoding="utf-8") as f:
         f.write(body)
     return out
+
+
+def cmd_ingest(args) -> int:
+    """Bulk-convert a folder of historical sheets into the parquet archive."""
+    pats = ("*.csv", "*.csv.gz", "*.CSV", "*.txt", "*.parquet", "*.pq")
+    src = args.src
+    if os.path.isdir(src):
+        files = []
+        for pat in pats:
+            files += glob.glob(os.path.join(src, "**", pat) if args.recursive
+                               else os.path.join(src, pat), recursive=args.recursive)
+    else:
+        files = glob.glob(src, recursive=args.recursive)
+    files = sorted(set(files))
+    if not files:
+        print(f"Nothing matched {src!r}.", file=sys.stderr)
+        return 1
+
+    os.makedirs(args.dir, exist_ok=True)
+    existing = {_date_of(f): f for f in list_archive(args.dir)}
+    print(f"Found {len(files)} file(s); archive currently holds "
+          f"{len(existing)} session(s).\n")
+
+    seen: dict[str, tuple[str, int]] = {}   # date -> (source file, rows)
+    done, skipped, failed = [], [], []
+
+    for i, f in enumerate(files, 1):
+        base = os.path.basename(f)
+        try:
+            df = fv.load_floorsheet(f)
+            if df.empty:
+                raise ValueError("no usable rows after cleaning")
+            d = fv.derive_trade_date(df) or _date_of(base)
+            if not d:
+                raise ValueError("no trading date in the contract numbers "
+                                 "or the filename")
+        except Exception as e:                      # noqa: BLE001 — report and continue
+            print(f"[{i}/{len(files)}] {base}: FAILED — {e}")
+            failed.append((base, str(e)))
+            continue
+
+        # Two files claiming the same session: keep the fuller one.
+        if d in seen:
+            prev_file, prev_rows = seen[d]
+            if len(df) <= prev_rows:
+                print(f"[{i}/{len(files)}] {base}: duplicate of {d} "
+                      f"({len(df):,} rows vs {prev_rows:,} in {prev_file}) — skipped")
+                skipped.append((base, f"duplicate of {d}"))
+                continue
+            print(f"[{i}/{len(files)}] {base}: duplicate of {d} but fuller "
+                  f"({len(df):,} vs {prev_rows:,}) — replacing")
+
+        target = os.path.join(args.dir, f"floorsheet_{d}.parquet")
+        if d in existing and not args.overwrite and d not in seen:
+            print(f"[{i}/{len(files)}] {base}: {d} already archived — skipped "
+                  f"(--overwrite to replace)")
+            skipped.append((base, "already archived"))
+            continue
+
+        if args.dry_run:
+            print(f"[{i}/{len(files)}] {base}: would write {os.path.basename(target)} "
+                  f"({len(df):,} rows, {fv.npr(df['amount'].sum())})")
+        else:
+            fv.save_parquet(df, target)
+            print(f"[{i}/{len(files)}] {base} -> {os.path.basename(target)} "
+                  f"({len(df):,} rows, {fv.npr(df['amount'].sum())}, "
+                  f"{os.path.getsize(target) / 1e6:.2f} MB)")
+        seen[d] = (base, len(df))
+        done.append(d)
+
+    print(f"\nConverted {len(done)}, skipped {len(skipped)}, failed {len(failed)}.")
+    if failed:
+        print("\nFailures:")
+        for name, err in failed:
+            print(f"  {name}: {err}")
+
+    if args.dry_run:
+        print("\nDry run — nothing written. Drop --dry-run to commit the conversion.")
+        return 0
+
+    # Rebuilding is the honest choice here: a bulk import can add hundreds of
+    # sessions and the incremental path is built for one at a time.
+    return cmd_manifest(args)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -244,6 +328,21 @@ def main(argv=None) -> int:
     m.add_argument("--readme", default=None)
     m.add_argument("--repo", default=None)
     m.set_defaults(fn=cmd_manifest)
+
+    g = sub.add_parser("ingest", help="bulk-convert a folder of csv dumps")
+    g.add_argument("--src", required=True,
+                   help="folder or glob, e.g. '/d/analysis/Floorsheet'")
+    g.add_argument("--dir", default="archive/parquet")
+    g.add_argument("--manifest", default="archive/manifest.csv")
+    g.add_argument("--readme", default=None)
+    g.add_argument("--repo", default=None)
+    g.add_argument("--recursive", action="store_true",
+                   help="also search sub-folders")
+    g.add_argument("--overwrite", action="store_true",
+                   help="replace sessions already in the archive")
+    g.add_argument("--dry-run", action="store_true",
+                   help="report what would happen, write nothing")
+    g.set_defaults(fn=cmd_ingest)
 
     p = sub.add_parser("panel", help="concatenate a date range")
     p.add_argument("--dir", default="archive/parquet")
