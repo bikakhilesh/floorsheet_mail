@@ -105,6 +105,24 @@ picker: dropdown, calendar input, prev/next buttons, left/right arrow keys, and
 python dashboard_site.py --archive archive/parquet --out site
 ```
 
+### Single day or a range
+
+The mode selector switches the whole app between one session and an aggregated
+window. In range mode you get two date inputs plus `5d` / `1m` / `3m` / `All`
+presets, and every tab then reports the aggregate: broker buy/sell/net summed
+across sessions, scrip turnover and volume summed with VWAP recomputed from
+them, high and low taken across the window, the flow matrix summed, and the
+block-trade table gaining a Day column so you can see which session each print
+came from. The URL carries `#2026-06-30..2026-07-30`, so a window is linkable.
+
+Aggregating a month is the point of the archive: a broker's net over one
+session is mostly noise, and over twenty it is a position. Medians are the one
+figure that cannot be aggregated, so median ticket shows as `—` in range mode.
+
+Only the sessions in the window are downloaded, roughly 0.2 MB each — a month
+takes a few seconds, the full archive around 25. Ranges over 80 sessions ask
+for confirmation first.
+
 Tabs are Overview, Brokers, Scrips, Block trades, Flow matrix and **Trends**.
 Trends works across sessions rather than within one: market turnover per
 session as a clickable bar chart, per-broker daily/cumulative net flow, and

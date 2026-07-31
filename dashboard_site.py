@@ -231,11 +231,26 @@ footer{color:var(--grey);font-size:11.5px;border-top:1px solid var(--line);
 <header><div class="wrap">
   <h1>NEPSE Floor Sheet Analytics</h1>
   <div class="picker">
-    <button id="prev" title="Previous session">&lsaquo;</button>
-    <select id="daySel"></select>
-    <input type="date" id="dayDate">
-    <button id="next" title="Next session">&rsaquo;</button>
-    <button id="latest">Latest</button>
+    <select id="mode" title="Analyse one session or aggregate a range">
+      <option value="day">Single day</option>
+      <option value="range">Date range</option>
+    </select>
+    <span id="dayCtl">
+      <button id="prev" title="Previous session">&lsaquo;</button>
+      <select id="daySel"></select>
+      <input type="date" id="dayDate">
+      <button id="next" title="Next session">&rsaquo;</button>
+      <button id="latest">Latest</button>
+    </span>
+    <span id="rangeCtl" style="display:none">
+      <input type="date" id="fromDate"> <span style="color:#9FB3C8">to</span>
+      <input type="date" id="toDate">
+      <button id="applyRange">Apply</button>
+      <button class="preset" data-n="5">5d</button>
+      <button class="preset" data-n="22">1m</button>
+      <button class="preset" data-n="66">3m</button>
+      <button class="preset" data-n="0">All</button>
+    </span>
     <span class="meta" id="meta"></span>
   </div>
   <div class="kpis" id="kpis"></div>
@@ -330,7 +345,7 @@ footer{color:var(--grey);font-size:11.5px;border-top:1px solid var(--line);
 
 <script>
 const CR=1e7, LAKH=1e5;
-let IDX=null, PANEL=null, DAY=null, DATE=null;
+let IDX=null, PANEL=null, DAY=null, DATE=null, RANGE=null;
 const CACHE=new Map();
 
 function npr(x,pre){pre=pre===undefined?'Rs ':pre;
@@ -353,12 +368,120 @@ async function boot(){
   sel.innerHTML=IDX.dates.slice().reverse().map(d=>`<option value="${d}">${d}</option>`).join('');
   $('#dayDate').min=IDX.dates[0]; $('#dayDate').max=IDX.dates[IDX.dates.length-1];
   const want=location.hash.slice(1);
-  await show(IDX.dates.includes(want)?want:IDX.dates[IDX.dates.length-1]);
+  if(want.includes('..')){
+    const [f,t]=want.split('..');
+    $('#mode').value='range'; $('#dayCtl').style.display='none';
+    $('#rangeCtl').style.display=''; $('#fromDate').value=f; $('#toDate').value=t;
+    await showRange(f,t);
+  } else {
+    await show(IDX.dates.includes(want)?want:IDX.dates[IDX.dates.length-1]);
+  }
   $('#foot').innerHTML='Broker net is a house-level proxy — the floor sheet does not '+
    'disclose client identity, and offsetting client orders net out inside a broker code. '+
    'Cross trades are typically negotiated transfers; screen them before reading flow. '+
    'NEPSE publishes no trade timestamp, so "last" is the final contract in sequence order. '+
    `Archive: ${IDX.dates.length} sessions, ${IDX.dates[0]} to ${IDX.dates[IDX.dates.length-1]}.`;
+}
+
+/* ---------- aggregate several sessions into one payload ---------- */
+function mergeDays(days, dates){
+  const C = days[0].cols;
+  const bi = {}; C.brokers.forEach((c,i)=>bi[c]=i);
+  const si = {}; C.scrips.forEach((c,i)=>si[c]=i);
+  const xi = {}; C.bscrip.forEach((c,i)=>xi[c]=i);
+  const pi = {}; C.pairs.forEach((c,i)=>pi[c]=i);
+  const ki = {}; C.blocks.forEach((c,i)=>ki[c]=i);
+
+  const B=new Map(), S=new Map(), X=new Map(), P=new Map();
+  let blocks=[], names={}, kpi={turnover:0,volume:0,trades:0,cross_amt:0,max_ticket:0};
+
+  days.forEach((d,di)=>{
+    Object.assign(names, d.names||{});
+    kpi.turnover+=d.kpi.turnover; kpi.volume+=d.kpi.volume; kpi.trades+=d.kpi.trades;
+    kpi.cross_amt+=d.kpi.cross_amt; kpi.max_ticket=Math.max(kpi.max_ticket,d.kpi.max_ticket);
+
+    d.brokers.forEach(r=>{const k=r[bi.code], o=B.get(k)||{code:k,buy:0,sell:0,trades:0,cross:0};
+      o.buy+=r[bi.buy]; o.sell+=r[bi.sell]; o.trades+=r[bi.trades];
+      o.cross+=r[bi.gross]*r[bi.crossPct]/200; B.set(k,o);});
+
+    d.scrips.forEach(r=>{const k=r[si.sym];
+      const o=S.get(k)||{sym:k,turnover:0,volume:0,trades:0,high:-1e18,low:1e18,last:0,
+                         nBuy:0,nSell:0};
+      o.turnover+=r[si.turnover]; o.volume+=r[si.volume]; o.trades+=r[si.trades];
+      o.high=Math.max(o.high,r[si.high]); o.low=Math.min(o.low,r[si.low]);
+      o.last=r[si.last];                              // days arrive in date order
+      o.nBuy=Math.max(o.nBuy,r[si.nBuy]); o.nSell=Math.max(o.nSell,r[si.nSell]);
+      S.set(k,o);});
+
+    d.bscrip.forEach(r=>{const k=r[xi.broker]+'|'+r[xi.sym];
+      const o=X.get(k)||{broker:r[xi.broker],sym:r[xi.sym],buy:0,sell:0};
+      o.buy+=r[xi.buy]; o.sell+=r[xi.sell]; X.set(k,o);});
+
+    d.pairs.forEach(r=>{const k=r[pi.buyer]+'|'+r[pi.seller];
+      const o=P.get(k)||{buyer:r[pi.buyer],seller:r[pi.seller],amount:0,trades:0};
+      o.amount+=r[pi.amount]; o.trades+=r[pi.trades]; P.set(k,o);});
+
+    d.blocks.forEach(r=>blocks.push([r[ki.sym],r[ki.buyer],r[ki.seller],r[ki.qty],
+      r[ki.rate],r[ki.amount],r[ki.cross],dates[di]]));
+  });
+
+  const brokers=[...B.values()].map(o=>{const gross=o.buy+o.sell;
+    return [o.code,o.buy,o.sell,gross,o.buy-o.sell,o.trades,
+      100*gross/(2*kpi.turnover), gross?100*2*o.cross/gross:0, gross/(o.trades||1)];})
+    .sort((a,b)=>b[3]-a[3]);
+
+  // buy-side HHI per scrip, from the aggregated broker x scrip cells
+  const buyBy=new Map();
+  X.forEach(o=>{const m=buyBy.get(o.sym)||new Map(); m.set(o.broker,(m.get(o.broker)||0)+o.buy);
+    buyBy.set(o.sym,m);});
+  const scrips=[...S.values()].map(o=>{
+    const vwap=o.volume?o.turnover/o.volume:0;
+    const m=buyBy.get(o.sym); let hhi=0;
+    if(m){const tot=[...m.values()].reduce((a,b)=>a+b,0);
+      if(tot>0)m.forEach(v=>hhi+=1e4*Math.pow(v/tot,2));}
+    return [o.sym,o.turnover,o.volume,o.trades,vwap,o.high,o.low,o.last,
+      vwap?100*(o.high-o.low)/vwap:0,o.nBuy,o.nSell,Math.round(hhi)];})
+    .sort((a,b)=>b[1]-a[1]);
+
+  const gs=brokers.map(r=>r[3]), tg=gs.reduce((a,b)=>a+b,0);
+  kpi.scrips=scrips.length; kpi.brokers=brokers.length;
+  kpi.avg_ticket=kpi.turnover/kpi.trades;
+  kpi.median_ticket=null;                       // medians do not aggregate
+  kpi.cross_pct=100*kpi.cross_amt/kpi.turnover;
+  kpi.top10_broker_pct=100*gs.slice(0,10).reduce((a,b)=>a+b,0)/(tg||1);
+  kpi.top10_scrip_pct=100*scrips.slice(0,10).reduce((a,r)=>a+r[1],0)/(kpi.turnover||1);
+  kpi.broker_hhi=gs.reduce((a,v)=>a+1e4*Math.pow(v/(tg||1),2),0);
+  kpi.scrip_hhi=scrips.reduce((a,r)=>a+1e4*Math.pow(r[1]/(kpi.turnover||1),2),0);
+
+  return {date:`${dates[0]} to ${dates[dates.length-1]}`, kpi, names, cols:{...C,
+      blocks:[...C.blocks,'day']},
+    brokers, scrips,
+    bscrip:[...X.values()].map(o=>[o.broker,o.sym,o.buy,o.sell]),
+    pairs:[...P.values()].map(o=>[o.buyer,o.seller,o.amount,o.trades])
+      .sort((a,b)=>b[2]-a[2]).slice(0,4000),
+    blocks: blocks.sort((a,b)=>b[5]-a[5]).slice(0,400)};
+}
+
+async function showRange(from,to){
+  const sel=IDX.dates.filter(d=>d>=from&&d<=to);
+  if(!sel.length){alert('No sessions between '+from+' and '+to);return;}
+  if(sel.length>80&&!confirm(`${sel.length} sessions will be downloaded `+
+     `(about ${Math.round(sel.length*0.2)} MB). Continue?`))return;
+  $('#load').classList.add('on');
+  try{
+    const days=[];
+    for(let i=0;i<sel.length;i++){
+      $('#load').textContent=`Loading ${i+1} of ${sel.length}…`;
+      if(!CACHE.has(sel[i]))
+        CACHE.set(sel[i],await (await fetch(`data/day/${sel[i]}.json`)).json());
+      days.push(CACHE.get(sel[i]));
+    }
+    DAY=mergeDays(days,sel); DATE=sel[sel.length-1]; RANGE=sel;
+    history.replaceState(null,'',`#${from}..${to}`);
+    $('#meta').textContent=`${sel.length} session${sel.length>1?'s':''} aggregated`;
+    renderAll();
+  }catch(e){alert('Could not load the range: '+e.message);}
+  finally{$('#load').classList.remove('on');$('#load').textContent='Loading…';}
 }
 
 async function show(date){
@@ -367,7 +490,7 @@ async function show(date){
   try{
     if(!CACHE.has(date))
       CACHE.set(date,await (await fetch(`data/day/${date}.json`)).json());
-    DAY=CACHE.get(date); DATE=date;
+    DAY=CACHE.get(date); DATE=date; RANGE=null;
     $('#daySel').value=date; $('#dayDate').value=date;
     history.replaceState(null,'','#'+date);
     const i=IDX.dates.indexOf(date);
@@ -380,6 +503,15 @@ async function show(date){
 
 /* ---------- header ---------- */
 function renderKpis(){
+  if(RANGE){                                  // aggregated: use the merged kpi
+    const K=DAY.kpi;
+    $('#kpis').innerHTML=[['Turnover',npr(K.turnover)],['Trades',num(K.trades)],
+      ['Volume',num(K.volume)],['Sessions',RANGE.length],['Scrips',num(K.scrips)],
+      ['Brokers',num(K.brokers)],['Avg ticket',npr(K.avg_ticket)],
+      ['Cross',pct(K.cross_pct)]]
+      .map(([l,v])=>`<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join('');
+    return;
+  }
   const k=IDX.kpi[DATE], i=IDX.dates.indexOf(DATE);
   const p=i>0?IDX.kpi[IDX.dates[i-1]]:null;
   const chg=(cur,prev)=>{if(!prev)return '';const d=100*(cur-prev)/prev;
@@ -444,7 +576,7 @@ function renderAll(){
     t:npr(b.net),click:`openBroker(${b.code})`})),{diverging:1});
   const K=DAY.kpi, big=BLOCKS.filter(b=>b.amount>=CR).length;
   $('#ovStats').innerHTML='<div class="stat">'+[['Broker HHI',num(K.broker_hhi)],
-    ['Scrip HHI',num(K.scrip_hhi)],['Median ticket',npr(K.median_ticket)],
+    ['Scrip HHI',num(K.scrip_hhi)],['Median ticket',K.median_ticket===null?'—':npr(K.median_ticket)],
     ['Largest ticket',npr(K.max_ticket)],['Cross trades',npr(K.cross_amt)],
     ['Tickets ≥ 1 Cr',big]].map(([l,v])=>`<div>${l}<b>${v}</b></div>`).join('')+'</div>'+
     '<h3 class="sec">Most concentrated buying</h3><div id="hhiBars"></div>';
@@ -476,14 +608,16 @@ function renderAll(){
     {k:'hhi',h:'Buy HHI',num:1,f:r=>num(r.hhi)}],
     ()=>{const q=$('#qScrip').value.trim().toUpperCase();
       return SCRIPS.filter(s=>!q||s.sym.includes(q));},s=>openScrip(s));
-  drawBlocks=makeTable('tBlock',[
+  const blockCols=[
     {k:'sym',h:'Scrip',f:r=>r.sym},{k:'buyer',h:'Buyer',f:r=>bname(r.buyer)},
     {k:'seller',h:'Seller',f:r=>bname(r.seller)},
     {k:'qty',h:'Qty',num:1,f:r=>num(r.qty)},
     {k:'rate',h:'Rate',num:1,f:r=>r.rate.toFixed(1)},
     {k:'amount',h:'Value',num:1,sort:1,f:r=>npr(r.amount,'')},
     {k:'cross',h:'Type',f:r=>r.cross?'<span class="tag cross">Cross</span>':
-      '<span class="tag inter">Inter-broker</span>'}],
+      '<span class="tag inter">Inter-broker</span>'}];
+  if(RANGE)blockCols.splice(1,0,{k:'day',h:'Day',f:r=>r.day});
+  drawBlocks=makeTable('tBlock',blockCols,
     ()=>{const q=$('#qBlock').value.trim().toLowerCase(),t=$('#fBlockType').value;
       return BLOCKS.filter(b=>(!q||b.sym.toLowerCase().includes(q)||String(b.buyer)===q||
         String(b.seller)===q)&&(t===''||String(b.cross)===t));});
@@ -617,6 +751,9 @@ async function renderTrends(){
   await ensurePanel();
   const d=IDX.dates, mark=d.indexOf(DATE);
   $('#trMarket').innerHTML=barChart(d,d.map(x=>IDX.kpi[x].turnover),'show',mark);
+  if(RANGE)$('#trMarket').insertAdjacentHTML('afterbegin',
+    `<div class="hint" style="margin-bottom:6px">Aggregating ${RANGE.length} `+
+    `session(s): ${RANGE[0]} to ${RANGE[RANGE.length-1]}.</div>`);
 
   const bsel=$('#trBroker');
   if(!bsel.options.length){
@@ -643,6 +780,18 @@ function drawScripTrend(){
     {unit:m==='vwap'?'':'L',mark:PANEL.dates.indexOf(DATE)});}
 
 /* ---------- wiring ---------- */
+$('#mode').onchange=e=>{
+  const r=e.target.value==='range';
+  $('#dayCtl').style.display=r?'none':''; $('#rangeCtl').style.display=r?'':'none';
+  if(r){ const d=IDX.dates, n=Math.min(22,d.length);
+    $('#fromDate').value=d[d.length-n]; $('#toDate').value=d[d.length-1];
+    showRange($('#fromDate').value,$('#toDate').value);
+  } else show(DATE||IDX.dates[IDX.dates.length-1]);};
+$('#applyRange').onclick=()=>showRange($('#fromDate').value,$('#toDate').value);
+document.querySelectorAll('.preset').forEach(b=>b.onclick=()=>{
+  const d=IDX.dates, n=+b.dataset.n||d.length;
+  const from=d[Math.max(0,d.length-n)], to=d[d.length-1];
+  $('#fromDate').value=from; $('#toDate').value=to; showRange(from,to);});
 $('#daySel').onchange=e=>show(e.target.value);
 $('#dayDate').onchange=e=>{ if(IDX.dates.includes(e.target.value))show(e.target.value);
   else{ const near=IDX.dates.filter(d=>d<=e.target.value).pop()||IDX.dates[0];
