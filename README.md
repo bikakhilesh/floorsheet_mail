@@ -295,6 +295,25 @@ append to it, so once the archive is a year deep that step is pulling ~150 MB a
 day. If that ever gets annoying, the fix is sharding by year and cloning only
 the current shard.
 
+## What the daily mail contains
+
+| Attachment | Size | What it is |
+|---|---|---|
+| `<date>.csv` | ~2.0 MB | the raw floor sheet, exactly as scraped |
+| `floorsheet_<date>.parquet` | ~0.6 MB | same data, for pandas |
+| `dashboard_<date>.html` | ~2.8 MB | the app with 22 sessions embedded, timeline included |
+| `floorsheet_<date>.html` | ~1.9 MB | the 14-exhibit chart pack |
+| `floorsheet_tables_<date>.zip` | ~0.1 MB | broker, scrip, block, pair and net-position CSVs |
+
+About 10.5 MB in total, against Gmail's 25 MB ceiling. The body itself stays at
+31 KB with five inline charts and a link to the dashboard, because Gmail clips
+bodies above ~102 KB.
+
+Levers if that is too much: `--gzip-source` takes the csv from 2.0 MB to
+0.45 MB, `--offline-days 10` halves the dashboard, and `--no-source` drops the
+raw files entirely. The mailer prints the message size each run and warns past
+20 MB.
+
 ## Mail integration
 
 Env vars: `SMTP_HOST` (default `smtp.gmail.com`), `SMTP_PORT` (587),

@@ -38,6 +38,8 @@ from __future__ import annotations
 import argparse
 import mimetypes
 import os
+import gzip
+import shutil
 import smtplib
 import ssl
 import sys
@@ -84,7 +86,8 @@ def plain_text_summary(a: fv.Analytics, dashboard_url: str | None = None) -> str
     for sym, r in a.scrip.head(5).iterrows():
         lines.append(f"  {sym:<10} {fv.npr(r['turnover']):>12}  "
                      f"VWAP {r['vwap']:>9,.1f}  range {r['range_pct']:.1f}%")
-    lines += ["", "Interactive dashboard and the full chart pack are attached."]
+    lines += ["", "Attached: the raw floor sheet (csv + parquet), the interactive "
+              "dashboard, the chart pack and the summary tables."]
     if dashboard_url:
         lines += [f"Online dashboard: {dashboard_url}"]
     return "\n".join(lines)
@@ -156,6 +159,10 @@ def main(argv=None) -> int:
                     help="status word prefixed to the subject, e.g. MISMATCH")
     ap.add_argument("--pages-url", default=os.environ.get("PAGES_URL") or None,
                     help="GitHub Pages site root; the dashboard link is built from it")
+    ap.add_argument("--no-source", action="store_true",
+                    help="do not attach the raw floor sheet csv/parquet")
+    ap.add_argument("--gzip-source", action="store_true",
+                    help="gzip the csv before attaching (~4x smaller)")
     ap.add_argument("--site", default=None,
                     help="built site directory; enables the multi-day attachment")
     ap.add_argument("--offline-days", type=int, default=22,
@@ -194,6 +201,21 @@ def main(argv=None) -> int:
     with open(res["email_body"], encoding="utf-8") as f:
         body_html = f.read()
 
+    # The raw floor sheet is the thing most likely to be wanted directly, so it
+    # goes in ahead of the derived artefacts.
+    if not args.no_source:
+        src = args.csv
+        if args.gzip_source and not src.lower().endswith(".gz"):
+            gz = os.path.join(args.outdir, os.path.basename(src) + ".gz")
+            with open(src, "rb") as fi, gzip.open(gz, "wb", 6) as fo:
+                shutil.copyfileobj(fi, fo)
+            src = gz
+        attachments.insert(0, src)
+        pq = os.path.join(args.outdir, f"floorsheet_{a.date}.parquet")
+        if not os.path.exists(pq):
+            pq = fv.save_parquet(fv.load_floorsheet(args.csv), pq)
+        attachments.insert(1, pq)
+
     tables_zip = zip_dir(os.path.join(args.outdir, "tables"),
                          os.path.join(args.outdir, f"floorsheet_tables_{a.date}.zip"))
     attachments.append(tables_zip)
@@ -218,6 +240,12 @@ def main(argv=None) -> int:
 
     msg = build_message(a, body_html, res["email_images"], attachments,
                         sender, recipients, dash_url, args.tag)
+    size = len(msg.as_bytes()) / 1e6
+    print(f"Message {size:.1f} MB, {len(attachments)} attachment(s): "
+          + ", ".join(os.path.basename(p) for p in attachments))
+    if size > 20:
+        print("WARNING: approaching Gmail's 25 MB limit — lower --offline-days.",
+              file=sys.stderr)
     host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
     port = int(os.environ.get("SMTP_PORT", "465"))
     ctx = ssl.create_default_context()
