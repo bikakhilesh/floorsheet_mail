@@ -1,0 +1,169 @@
+name: nepse-scrape
+
+# Job one of two. Captures the session, puts it in the archive, mails the raw
+# csv — and stops. Nothing here depends on charts, the site or the dashboard,
+# so a failure on the analysis side can never cost you the day's data.
+#
+# Analysis runs in nepse-dashboard.yml, triggered when this finishes.
+#
+# Secrets: GMAIL_USER, GMAIL_APP_PW, MAIL_TO_CSV
+#   MAIL_TO_CSV is the data distribution list. If it is unset the mailer falls
+#   back to MAIL_TO, so nothing breaks before you add it.
+
+on:
+  schedule:
+    # 10:15 UTC = 16:00 NPT, Monday–Friday (NEPSE moved off Sun–Thu in Apr 2026)
+    - cron: '15 10 * * 1,2,3,4,5'
+  workflow_dispatch:
+
+permissions:
+  contents: write        # force-push the data branch
+
+concurrency:
+  group: floorsheet-scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    # Must exceed VERIFY_BUDGET_SEC in the script (3600s) plus a final scrape.
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # continue-on-error so a MISMATCH still gets archived and mailed.
+      - name: Scrape floor sheet
+        id: scrape
+        continue-on-error: true
+        env:
+          OUTPUT_DIR: ${{ github.workspace }}/data
+        run: |
+          mkdir -p data
+          python floorsheet_scrape_and_mail.py
+
+      # The trading date comes from the contract numbers, not the filename, so a
+      # holiday or a cached page shows up here as fresh=false.
+      - name: Probe the scraped sheet
+        id: probe
+        if: always()
+        run: |
+          CSV=$(ls -1 data/*.csv 2>/dev/null | sort | tail -n 1 || true)
+          if [ ! -s "$CSV" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No floor sheet produced."
+            exit 0
+          fi
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "csv=$CSV"   >> "$GITHUB_OUTPUT"
+          python interactive_report.py --data "$CSV" --probe | tee /tmp/probe.txt
+          grep -E '^(date|fresh|age_days|rows|turnover)=' /tmp/probe.txt >> "$GITHUB_OUTPUT"
+          grep -q '^fresh=true' /tmp/probe.txt || \
+            echo "::warning::Not the current session — expected on a market holiday."
+
+      - name: Convert to parquet
+        if: steps.probe.outputs.fresh == 'true'
+        run: |
+          mkdir -p out
+          python -c "import floorsheet_viz as fv; print(fv.save_parquet(fv.load_floorsheet('${{ steps.probe.outputs.csv }}'), 'out/floorsheet_${{ steps.probe.outputs.date }}.parquet'))"
+
+      # Orphan + force-push keeps the branch at one commit, so the repo carries
+      # the current file set once rather than a new copy of history each day.
+      - name: Archive to the data branch
+        if: steps.probe.outputs.fresh == 'true'
+        run: |
+          set -euo pipefail
+          URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          if git clone --quiet --depth 1 --branch data "$URL" archive; then
+            rm -rf archive/.git
+          else
+            echo "No data branch yet — creating it."
+            mkdir -p archive/parquet
+          fi
+          python floorsheet_archive.py add \
+            --file "out/floorsheet_${{ steps.probe.outputs.date }}.parquet" \
+            --dir archive/parquet --manifest archive/manifest.csv \
+            --readme archive/README.md \
+            --repo "https://github.com/${{ github.repository }}.git"
+          cd archive
+          git init -q
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q --orphan main
+          git add -A
+          git commit -q -m "Floor sheet archive through ${{ steps.probe.outputs.date }}"
+          git push -q --force "$URL" main:data
+
+      - name: Mail the csv
+        if: steps.probe.outputs.fresh == 'true'
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PW: ${{ secrets.GMAIL_APP_PW }}
+          MAIL_TO_CSV: ${{ secrets.MAIL_TO_CSV }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          SCRAPE_STATUS: ${{ steps.scrape.outcome == 'success' && 'OK' || 'CHECK SCRAPE' }}
+        run: |
+          python mail_csv.py \
+            --data "${{ steps.probe.outputs.csv }}" \
+            --parquet "out/floorsheet_${{ steps.probe.outputs.date }}.parquet" \
+            --outdir out --to-env MAIL_TO_CSV
+
+      - name: Upload the session
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: floorsheet-data
+          path: |
+            data/*.csv
+            out/*.parquet
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Fail if the scrape did not succeed
+        if: steps.scrape.outcome != 'success'
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PW: ${{ secrets.GMAIL_APP_PW }}
+          MAIL_TO_CSV: ${{ secrets.MAIL_TO_CSV }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          MAILED: ${{ steps.probe.outputs.fresh }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import os, ssl, smtplib
+          from email.message import EmailMessage
+          u, p = os.environ.get("GMAIL_USER"), os.environ.get("GMAIL_APP_PW")
+          to = [x.strip() for x in (os.environ.get("MAIL_TO_CSV")
+                or os.environ.get("MAIL_TO", "")).split(",") if x.strip()]
+          if os.environ.get("MAILED") == "true":
+              print("Data mail already went out with the status flagged.")
+          elif u and p and to:
+              m = EmailMessage()
+              m["Subject"] = "[NEPSE Floorsheet FAILED] no floor sheet produced"
+              m["From"], m["To"] = u, ", ".join(to)
+              m.set_content("The scrape produced no csv.\n\n"
+                            + os.environ["RUN_URL"] + "\n")
+              with smtplib.SMTP_SSL("smtp.gmail.com", 465,
+                                    context=ssl.create_default_context()) as s:
+                  s.login(u, p); s.send_message(m)
+              print("Failure alert sent.")
+          else:
+              print("Alert skipped: mail secrets not set.")
+          PY
+          exit 1

@@ -1,0 +1,138 @@
+name: nepse-dashboard
+
+# Job two of two. Reads the archive on the data branch — it never scrapes — then
+# rebuilds the site, publishes it to Pages, and mails the dashboard and chart
+# pack. Because it takes no part in capturing the data, it can fail, be re-run,
+# or be triggered by hand as often as you like without risk.
+#
+# Secrets: GMAIL_USER, GMAIL_APP_PW, MAIL_TO_DASH
+#   MAIL_TO_DASH is the analysis distribution list, separate from MAIL_TO_CSV.
+#   Falls back to MAIL_TO if unset.
+
+on:
+  workflow_run:
+    workflows: ["nepse-scrape"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Session to report on as YYYY-MM-DD (blank = newest)"
+        required: false
+      offline_days:
+        description: "Sessions embedded in the mailed dashboard"
+        default: "22"
+      skip_mail:
+        description: "Rebuild and publish only, do not mail"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write        # force-push the gh-pages site
+
+concurrency:
+  group: floorsheet-dashboard
+  cancel-in-progress: false
+
+jobs:
+  dashboard:
+    # Skip when the scrape produced nothing; a MISMATCH still archived a session
+    # and is worth reporting, so only an outright failure stops us.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Fetch the archive
+        id: arch
+        run: |
+          set -euo pipefail
+          URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          if ! git clone --quiet --depth 1 --branch data "$URL" archive; then
+            echo "::error::No data branch — run nepse-scrape first."
+            exit 1
+          fi
+          COUNT=$(ls -1 archive/parquet/*.parquet 2>/dev/null | wc -l)
+          test "$COUNT" -gt 0 || { echo "::error::Archive is empty."; exit 1; }
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            DATE="${{ github.event.inputs.date }}"
+          else
+            DATE=$(ls -1 archive/parquet/*.parquet | sort | tail -1 \
+                   | sed 's#.*floorsheet_##; s#\.parquet##')
+          fi
+          test -s "archive/parquet/floorsheet_$DATE.parquet" \
+            || { echo "::error::No session for $DATE in the archive."; exit 1; }
+          echo "date=$DATE"   >> "$GITHUB_OUTPUT"
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "Archive holds $COUNT session(s); reporting on $DATE."
+
+      # Per-day JSON is reused from the live site, so only new sessions are
+      # computed and the rebuild stays around a second.
+      - name: Build the site
+        run: |
+          mkdir -p site/data
+          if git clone --depth 1 --branch gh-pages \
+               "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+               site_old 2>/dev/null; then
+            cp -r site_old/data/. site/data/ 2>/dev/null || true
+          else
+            echo "No gh-pages branch yet — building the whole site once."
+          fi
+          python dashboard_site.py --archive archive/parquet --out site
+          touch site/.nojekyll
+
+      - name: Publish to GitHub Pages
+        run: |
+          set -euo pipefail
+          cd site
+          git init -q
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q --orphan main
+          git add -A
+          git commit -q -m "Floor sheet dashboards through ${{ steps.arch.outputs.date }}"
+          git push -q --force \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+            main:gh-pages
+
+      - name: Mail the dashboard
+        if: github.event.inputs.skip_mail != 'true'
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PW: ${{ secrets.GMAIL_APP_PW }}
+          MAIL_TO_DASH: ${{ secrets.MAIL_TO_DASH }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          MPLBACKEND: Agg
+        run: |
+          python mail_floorsheet.py \
+            --data "archive/parquet/floorsheet_${{ steps.arch.outputs.date }}.parquet" \
+            --outdir out --top 20 --dpi 120 \
+            --site site --offline-days ${{ github.event.inputs.offline_days || 22 }} \
+            --no-source --to-env MAIL_TO_DASH \
+            --pages-url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+
+      - name: Upload the analytics pack
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: floorsheet-analytics
+          path: |
+            out/charts/*.png
+            out/tables/*.csv
+            out/dashboard_*.html
+            out/floorsheet_*.html
+          retention-days: 30
+          if-no-files-found: ignore

@@ -56,12 +56,12 @@ import floorsheet_viz as fv
 import interactive_report as ir
 
 
-def creds() -> tuple[str, str, str, list[str]]:
+def creds(to_env: str = "MAIL_TO_DASH") -> tuple[str, str, str, list[str]]:
     user = os.environ.get("GMAIL_USER") or os.environ.get("SMTP_USER", "")
     pw = os.environ.get("GMAIL_APP_PW") or os.environ.get("SMTP_PASS", "")
     sender = os.environ.get("MAIL_FROM") or user
-    to = [r.strip() for r in os.environ.get("MAIL_TO", "").split(",") if r.strip()]
-    return user, pw, sender, to
+    raw = os.environ.get(to_env) or os.environ.get("MAIL_TO", "")
+    return user, pw, sender, [r.strip() for r in raw.split(",") if r.strip()]
 
 
 def plain_text_summary(a: fv.Analytics, dashboard_url: str | None = None) -> str:
@@ -159,6 +159,8 @@ def main(argv=None) -> int:
                     help="status word prefixed to the subject, e.g. MISMATCH")
     ap.add_argument("--pages-url", default=os.environ.get("PAGES_URL") or None,
                     help="GitHub Pages site root; the dashboard link is built from it")
+    ap.add_argument("--to-env", default="MAIL_TO_DASH",
+                    help="env var holding the recipients")
     ap.add_argument("--no-source", action="store_true",
                     help="do not attach the raw floor sheet csv/parquet")
     ap.add_argument("--gzip-source", action="store_true",
@@ -220,7 +222,7 @@ def main(argv=None) -> int:
                          os.path.join(args.outdir, f"floorsheet_tables_{a.date}.zip"))
     attachments.append(tables_zip)
 
-    user, pw, sender, recipients = creds()
+    user, pw, sender, recipients = creds(args.to_env)
 
     if args.dry_run:
         msg = build_message(a, body_html, res["email_images"], attachments,
@@ -235,7 +237,8 @@ def main(argv=None) -> int:
         return 0
 
     if not (user and pw and recipients):
-        print("GMAIL_USER/GMAIL_APP_PW/MAIL_TO must be set.", file=sys.stderr)
+        print(f"GMAIL_USER/GMAIL_APP_PW and {args.to_env} (or MAIL_TO) "
+              f"must be set.", file=sys.stderr)
         return 2
 
     msg = build_message(a, body_html, res["email_images"], attachments,

@@ -295,24 +295,47 @@ append to it, so once the archive is a year deep that step is pulling ~150 MB a
 day. If that ever gets annoying, the fix is sharding by year and cloning only
 the current shard.
 
-## What the daily mail contains
+## Two workflows, two mails
 
-| Attachment | Size | What it is |
-|---|---|---|
-| `<date>.csv` | ~2.0 MB | the raw floor sheet, exactly as scraped |
-| `floorsheet_<date>.parquet` | ~0.6 MB | same data, for pandas |
-| `dashboard_<date>.html` | ~2.8 MB | the app with 22 sessions embedded, timeline included |
-| `floorsheet_<date>.html` | ~1.9 MB | the 14-exhibit chart pack |
-| `floorsheet_tables_<date>.zip` | ~0.1 MB | broker, scrip, block, pair and net-position CSVs |
+Capture and analysis are separate, so nothing on the analysis side can cost you
+a day's data.
 
-About 10.5 MB in total, against Gmail's 25 MB ceiling. The body itself stays at
-31 KB with five inline charts and a link to the dashboard, because Gmail clips
-bodies above ~102 KB.
+**`nepse-scrape.yml`** — scrape, archive to the `data` branch, mail the raw csv.
+Runs 16:00 NPT, Mon–Fri. Needs no matplotlib and no archive history.
 
-Levers if that is too much: `--gzip-source` takes the csv from 2.0 MB to
-0.45 MB, `--offline-days 10` halves the dashboard, and `--no-source` drops the
-raw files entirely. The mailer prints the message size each run and warns past
-20 MB.
+| Attachment | Size |
+|---|---|
+| `<date>.csv` | ~2.0 MB |
+| `floorsheet_<date>.parquet` | ~0.6 MB |
+
+3.5 MB total, sent to **`MAIL_TO_CSV`**.
+
+**`nepse-dashboard.yml`** — triggered when the scrape finishes, or by hand.
+Reads the archive, rebuilds the site, publishes to Pages, mails the analysis.
+Never scrapes, so it is safe to re-run.
+
+| Attachment | Size |
+|---|---|
+| `dashboard_<date>.html` | ~2.8 MB — the app with 22 sessions and the timeline |
+| `floorsheet_<date>.html` | ~1.9 MB — the 14-exhibit chart pack |
+| `floorsheet_tables_<date>.zip` | ~0.1 MB — broker, scrip, block, pair, net-position csvs |
+
+7.0 MB total, sent to **`MAIL_TO_DASH`**.
+
+### Secrets
+
+| Secret | Used by |
+|---|---|
+| `GMAIL_USER`, `GMAIL_APP_PW` | both |
+| `MAIL_TO_CSV` | the data mail |
+| `MAIL_TO_DASH` | the dashboard mail |
+
+Both recipient lists fall back to `MAIL_TO` when unset, so the existing secret
+keeps everything working until you split the lists.
+
+`workflow_dispatch` on the dashboard job takes a `date` (report on any archived
+session), `offline_days` (how many sessions to embed) and `skip_mail` (rebuild
+and publish without sending).
 
 ## Mail integration
 
