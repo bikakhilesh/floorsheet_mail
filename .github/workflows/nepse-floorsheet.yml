@@ -91,27 +91,13 @@ jobs:
           skipping publish and mail. This is expected on a market holiday."
           fi
 
-      - name: Build interactive dashboard for the site
+      - name: Convert the session to parquet
         if: steps.probe.outputs.fresh == 'true'
         run: |
-          mkdir -p site/reports out
-          # Seed from the live site so the archive accumulates across days.
-          if git clone --depth 1 --branch gh-pages \
-               "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
-               site_old 2>/dev/null; then
-            cp -r site_old/reports/. site/reports/ 2>/dev/null || true
-          else
-            echo "No gh-pages branch yet — starting a fresh site."
-          fi
-          # --require-fresh is belt-and-braces: the gate above already checked,
-          # but this makes the guarantee hold when the script is run by hand.
-          # --to-parquet keeps a compact copy (~30% of the csv) in the artifact.
-          python interactive_report.py \
-            --data "${{ steps.probe.outputs.csv }}" \
-            --out site/reports --index site/index.html --keep 40 \
-            --require-fresh \
-            --to-parquet "out/floorsheet_${{ steps.probe.outputs.date }}.parquet"
-          touch site/.nojekyll
+          mkdir -p out
+          python interactive_report.py --data "${{ steps.probe.outputs.csv }}" \
+            --probe --require-fresh > /dev/null
+          python -c "import floorsheet_viz as fv; print(fv.save_parquet(fv.load_floorsheet('${{ steps.probe.outputs.csv }}'), 'out/floorsheet_${{ steps.probe.outputs.date }}.parquet'))"
 
       # The parquet copy has to outlive the 30-day artifact retention, so it is
       # committed to a `data` branch. Orphan + force-push means the repo carries
@@ -141,6 +127,23 @@ jobs:
           git add -A
           git commit -q -m "Floor sheet archive through ${{ steps.probe.outputs.date }}"
           git push -q --force "$URL" main:data
+
+      # The site now spans the whole archive with a day picker, so it is built
+      # from archive/parquet rather than today's csv. Per-day JSON is reused
+      # from the live site, so only the new session is computed.
+      - name: Build the multi-day dashboard site
+        if: steps.probe.outputs.fresh == 'true'
+        run: |
+          mkdir -p site/data
+          if git clone --depth 1 --branch gh-pages \
+               "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+               site_old 2>/dev/null; then
+            cp -r site_old/data/. site/data/ 2>/dev/null || true
+          else
+            echo "No gh-pages branch yet — building the whole site once."
+          fi
+          python dashboard_site.py --archive archive/parquet --out site
+          touch site/.nojekyll
 
       - name: Publish to GitHub Pages
         if: steps.probe.outputs.fresh == 'true'

@@ -92,12 +92,44 @@ dashboard would arrive as a dead husk. It is delivered two ways instead:
 2. **Linked** via `--pages-url`, which puts an "Open the interactive dashboard"
    button at the top of the body pointing at the GitHub Pages copy.
 
-## Interactive dashboard
+## Dashboards
+
+Two different artefacts, because they have incompatible constraints.
+
+**`dashboard_site.py` — the site.** One app over the whole archive with a day
+picker: dropdown, calendar input, prev/next buttons, left/right arrow keys, and
+`#YYYY-MM-DD` in the URL so a specific session is linkable. Published to
+`gh-pages` each run.
 
 ```bash
-python interactive_report.py --data data/2026.07.30.csv \
-    --out site/reports --index site/index.html --keep 40
+python dashboard_site.py --archive archive/parquet --out site
 ```
+
+Tabs are Overview, Brokers, Scrips, Block trades, Flow matrix and **Trends**.
+Trends works across sessions rather than within one: market turnover per
+session as a clickable bar chart, per-broker daily/cumulative net flow, and
+per-scrip turnover or VWAP. Opening a broker or scrip drawer on any day also
+shows that name's full history, so a position can be read as built-over-time
+rather than a single day's snapshot.
+
+Only the selected day is downloaded — the app opens at the same speed whether
+the archive holds ten sessions or a thousand. `panel.json` loads lazily the
+first time Trends is opened.
+
+| File | Size | Loaded |
+|---|---|---|
+| `index.html` | 31 KB | always |
+| `data/index.json` | ~1 KB per session | always |
+| `data/day/<date>.json` | ~200 KB | on demand |
+| `data/panel.json` | ~3 KB per session | on first Trends open |
+
+A rebuild reuses per-day JSON from the live site and only computes the new
+session: 107 sessions cold takes about 70 seconds, warm about 1 second.
+
+**`interactive_report.py` — the mail attachment.** A single self-contained file
+for one day, everything inlined, no `fetch()`. That is what makes it work
+opened straight from an attachment with no network. The site app cannot do this
+because it fetches per-day JSON, and mail clients strip scripts anyway.
 
 ### Input formats
 
