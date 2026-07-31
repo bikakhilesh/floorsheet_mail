@@ -10,7 +10,9 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Must exceed VERIFY_BUDGET_SEC in the script (3600s) plus one final
+    # scrape + email, with headroom. Script self-limits; this is the backstop.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
 
