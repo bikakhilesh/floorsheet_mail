@@ -24,6 +24,7 @@ offline from an attachment, which rules out fetch().
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -40,6 +41,23 @@ def _py(x):
     return x.item() if hasattr(x, "item") else x
 
 
+def _sig(path: str) -> str:
+    """Content signature of one archived session.
+
+    The cache key cannot be "does the day file exist". A corrective re-scrape
+    replaces floorsheet_<date>.parquet under the same name, and the cached json
+    would then be published against data it no longer describes — the mail,
+    which reads the parquet directly, and the site would disagree. mtime is no
+    use either: the archive is a fresh shallow clone on every run, so every
+    file looks newly written. Hash the bytes.
+    """
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()[:16]
+
+
 def build_site_data(archive: str, out: str, rebuild: bool = False) -> dict:
     files = sorted(f for f in os.listdir(archive)
                    if f.endswith((".parquet", ".pq")) and fv.filename_date(f))
@@ -49,25 +67,41 @@ def build_site_data(archive: str, out: str, rebuild: bool = False) -> dict:
     ddir = os.path.join(out, "data", "day")
     os.makedirs(ddir, exist_ok=True)
 
+    # Sidecar rather than a key inside each payload: the day files are served
+    # to the browser and embedded in the mail attachment, and neither should
+    # carry build metadata. Losing it just costs one full rebuild.
+    sig_path = os.path.join(ddir, "_sigs.json")
+    try:
+        with open(sig_path, encoding="utf-8") as fh:
+            sigs = json.load(fh)
+    except (OSError, ValueError):
+        sigs = {}
+
     dates, kpis = [], {}
     br_series: dict[str, dict[str, list]] = {}
     sc_series: dict[str, dict[str, list]] = {}
 
     for i, f in enumerate(files, 1):
         d = fv.filename_date(f)
+        src = os.path.join(archive, f)
         day_path = os.path.join(ddir, f"{d}.json")
-        need = rebuild or not os.path.exists(day_path)
+        cached = os.path.exists(day_path)
+        sig = _sig(src)
+        need = rebuild or not cached or sigs.get(d) != sig
 
         if need:
-            # Only new sessions touch parquet. Everything else is rebuilt from
-            # the cached day file, which keeps the daily run O(1) rather than
-            # O(archive) once the history is a year deep.
-            df = fv.load_floorsheet(os.path.join(archive, f))
+            # Only new or changed sessions touch parquet. Everything else is
+            # rebuilt from the cached day file, which keeps the daily run O(1)
+            # rather than O(archive) once the history is a year deep.
+            df = fv.load_floorsheet(src)
             a = fv.build_analytics(df, d)
             payload = ir.build_payload(a)
             with open(day_path, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, separators=(",", ":"), default=_py)
+            sigs[d] = sig
             note = f"{len(df):,} rows"
+            if cached:
+                note += " · replaced"
         else:
             with open(day_path, encoding="utf-8") as fh:
                 payload = json.load(fh)
@@ -98,6 +132,12 @@ def build_site_data(archive: str, out: str, rebuild: bool = False) -> dict:
                 round(row[ti] / L, 1), round(float(row[vi]), 2)]
 
         print(f"[{i}/{len(files)}] {d}  {note}  {fv.npr(k['turnover'])}")
+
+    # Written only after every session is through, so a crash mid-build leaves
+    # the old index in place and the affected days recompute on the next run.
+    sigs = {d: s for d, s in sigs.items() if d in set(dates)}
+    with open(sig_path, "w", encoding="utf-8") as fh:
+        json.dump(sigs, fh, separators=(",", ":"), sort_keys=True)
 
     # Align the series to the date axis, null where a broker or scrip was absent
     def align(series: dict[str, dict[str, list]], n: int) -> dict:
