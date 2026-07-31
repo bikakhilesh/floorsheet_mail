@@ -100,10 +100,12 @@ def zip_dir(src: str, dst: str) -> str:
 
 def build_message(a, body_html: str, images: dict, attachments: list[str],
                   sender: str, recipients: list[str],
-                  dashboard_url: str | None = None) -> MIMEMultipart:
+                  dashboard_url: str | None = None,
+                  tag: str | None = None) -> MIMEMultipart:
     msg = MIMEMultipart("mixed")
-    msg["Subject"] = (f"NEPSE Floor Sheet — {a.date} | T/O {fv.npr(a.kpi['turnover'])} | "
-                      f"{a.kpi['trades']:,} trades")
+    prefix = f"[{tag}] " if tag and tag.upper() != "OK" else ""
+    msg["Subject"] = (f"{prefix}NEPSE Floor Sheet — {a.date} | "
+                      f"T/O {fv.npr(a.kpi['turnover'])} | {a.kpi['trades']:,} trades")
     msg["From"] = sender
     msg["To"] = ", ".join(recipients)
     msg["Date"] = formatdate(localtime=True)
@@ -142,12 +144,15 @@ def build_message(a, body_html: str, images: dict, attachments: list[str],
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", required=True)
+    ap.add_argument("--csv", "--data", dest="csv", required=True,
+                    help="floor sheet: .parquet, .csv, or .csv.gz")
     ap.add_argument("--outdir", default="out")
     ap.add_argument("--top", type=int, default=20)
     ap.add_argument("--dpi", type=int, default=120)
     ap.add_argument("--brokers", default=None)
     ap.add_argument("--date", default=None)
+    ap.add_argument("--tag", default=os.environ.get("SCRAPE_STATUS") or None,
+                    help="status word prefixed to the subject, e.g. MISMATCH")
     ap.add_argument("--pages-url", default=os.environ.get("PAGES_URL") or None,
                     help="GitHub Pages site root; the dashboard link is built from it")
     ap.add_argument("--no-interactive", action="store_true",
@@ -156,7 +161,8 @@ def main(argv=None) -> int:
                     help="build everything and write message.eml, do not send")
     args = ap.parse_args(argv)
 
-    date_guess = args.date or fv.infer_date(args.csv)
+    date_guess = args.date or fv.derive_trade_date(
+        fv.load_floorsheet(args.csv)) or fv.infer_date(args.csv)
     dash_url = (f"{args.pages_url.rstrip('/')}/reports/floorsheet_{date_guess}.html"
                 if args.pages_url else None)
 
@@ -185,7 +191,7 @@ def main(argv=None) -> int:
     if args.dry_run:
         msg = build_message(a, body_html, res["email_images"], attachments,
                             sender or "noreply@example.com",
-                            recipients or ["test@example.com"], dash_url)
+                            recipients or ["test@example.com"], dash_url, args.tag)
         eml = os.path.join(args.outdir, "message.eml")
         with open(eml, "w", encoding="utf-8") as f:
             f.write(msg.as_string())
@@ -199,7 +205,7 @@ def main(argv=None) -> int:
         return 2
 
     msg = build_message(a, body_html, res["email_images"], attachments,
-                        sender, recipients, dash_url)
+                        sender, recipients, dash_url, args.tag)
     host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
     port = int(os.environ.get("SMTP_PORT", "465"))
     ctx = ssl.create_default_context()

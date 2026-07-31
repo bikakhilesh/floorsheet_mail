@@ -95,9 +95,39 @@ dashboard would arrive as a dead husk. It is delivered two ways instead:
 ## Interactive dashboard
 
 ```bash
-python interactive_report.py --csv data/2026.07.30.csv \
+python interactive_report.py --data data/2026.07.30.csv \
     --out site/reports --index site/index.html --keep 40
 ```
+
+### Input formats
+
+`--data` takes parquet, csv, or compressed csv — the format is picked off the
+extension. Parquet and csv produce byte-identical reports; parquet is about 30%
+of the size and round-trips dtypes, so `Contract No.` does not come back as a
+float. `--to-parquet PATH` writes a parquet copy alongside the report.
+
+### It always builds from the current session
+
+The trading date is read out of the **contract numbers** (`YYYYMMDD` prefix),
+not the filename, because that is the exchange's own numbering and a filename
+can lie. `--probe` reports it without writing anything:
+
+```
+$ python interactive_report.py --data data/2026.07.30.csv --probe
+date=2026-07-30
+fresh=true
+age_days=0
+rows=44651
+turnover=3381318248.02
+```
+
+`--require-fresh` exits 3 rather than writing a report when the sheet is not the
+current Nepal-time session, and `--max-age-days N` widens that if you are
+backfilling. The workflow gates the publish and mail steps on `fresh=true`, so a
+market holiday, a cached page, or a scraper that silently returned the previous
+session cannot republish yesterday's numbers as today's — the run passes and
+skips instead. A filename that disagrees with the contract numbers is reported
+as a warning, and the contract numbers win.
 
 Single file, vanilla JS, no dependencies. Tabs: Overview, Brokers, Scrips,
 Block trades, Flow matrix.

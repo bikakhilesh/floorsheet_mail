@@ -24,7 +24,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 
 import matplotlib
 
@@ -118,8 +118,38 @@ COLMAP = {
 }
 
 
+def read_any(path: str) -> pd.DataFrame:
+    """Read a floor sheet from parquet, csv, or compressed csv.
+
+    Parquet is preferred for archives: the 30 Jul sheet is 2.0 MB as csv and
+    ~0.35 MB as parquet, and it round-trips dtypes so Contract No. does not
+    come back as a float.
+    """
+    ext = os.path.splitext(path.lower())[1]
+    if ext in (".parquet", ".pq"):
+        return pd.read_parquet(path)
+    if ext == ".feather":
+        return pd.read_feather(path)
+    # read_csv handles .gz/.bz2/.xz/.zip transparently
+    return pd.read_csv(path)
+
+
+def save_parquet(df: pd.DataFrame, path: str) -> str:
+    """Persist a floor sheet as parquet, in the original column names."""
+    out = df.rename(columns=OUTCOLS)[[c for c in OUTCOLS.values() if c in
+                                      df.rename(columns=OUTCOLS).columns]]
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    out.to_parquet(path, index=False, compression="zstd")
+    return path
+
+
+OUTCOLS = {"contract": "Contract No.", "symbol": "Stock Symbol",
+           "buyer": "Buyer", "seller": "Seller", "qty": "Quantity",
+           "rate": "Rate (Rs)", "amount": "Amount (Rs)"}
+
+
 def load_floorsheet(path: str, broker_map_path: str | None = None) -> pd.DataFrame:
-    df = pd.read_csv(path)
+    df = read_any(path)
     df.columns = [COLMAP.get(str(c).strip().lower(), str(c).strip().lower()) for c in df.columns]
 
     required = {"symbol", "buyer", "seller", "qty", "rate", "amount"}
@@ -953,11 +983,62 @@ def dump_tables(a: Analytics, tdir: str) -> list[str]:
 # ────────────────────────────────────────────────────────────────────────────
 # Orchestration
 # ────────────────────────────────────────────────────────────────────────────
-def infer_date(path: str) -> str:
+NPT_OFFSET = timedelta(hours=5, minutes=45)
+
+
+def npt_today() -> date:
+    """Today's date in Nepal time (UTC+5:45) — the runner clock is UTC."""
+    return (datetime.now(timezone.utc) + NPT_OFFSET).date()
+
+
+def derive_trade_date(df: pd.DataFrame) -> str | None:
+    """Trading date from the contract numbers (YYYYMMDD prefix).
+
+    This is authoritative: it comes from the exchange's own numbering, so it
+    catches the case where a scrape silently returns the previous session.
+    """
+    if "contract" not in df.columns:
+        return None
+    cn = df["contract"].astype(str).str.strip()
+    pre = cn[cn.str.fullmatch(r"\d{16}")].str[:8]
+    if pre.empty:
+        return None
+    top = pre.value_counts()
+    d = top.index[0]
+    try:
+        parsed = date(int(d[:4]), int(d[4:6]), int(d[6:8])).isoformat()
+    except ValueError:
+        return None
+    if len(top) > 1:
+        print(f"WARNING: contract numbers span {len(top)} dates "
+              f"{dict(list(top.items())[:3])}; using {parsed}.")
+    return parsed
+
+
+def freshness(date_str: str, max_age_days: int = 0) -> tuple[bool, int, str]:
+    """Is this floor sheet the current session's? Returns (ok, age, message)."""
+    try:
+        d = date.fromisoformat(date_str)
+    except ValueError:
+        return False, -1, f"Unparseable trading date {date_str!r}."
+    age = (npt_today() - d).days
+    if age < 0:
+        return False, age, f"Trading date {date_str} is in the future (NPT today {npt_today()})."
+    if age > max_age_days:
+        return (False, age,
+                f"Floor sheet is {age} day(s) old ({date_str}); NPT today is "
+                f"{npt_today()}. Refusing to publish it as a fresh report.")
+    return True, age, f"Floor sheet is current ({date_str}, {age} day(s) old)."
+
+
+def filename_date(path: str) -> str | None:
+    """Date embedded in the filename, or None if there isn't one."""
     m = re.search(r"(20\d{2})[._\-]?(\d{2})[._\-]?(\d{2})", os.path.basename(path))
-    if m:
-        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
-    return datetime.now().strftime("%Y-%m-%d")
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else None
+
+
+def infer_date(path: str) -> str:
+    return filename_date(path) or npt_today().isoformat()
 
 
 def run(csv_path: str, outdir: str, top: int = 20, dpi: int = 120,
@@ -966,8 +1047,8 @@ def run(csv_path: str, outdir: str, top: int = 20, dpi: int = 120,
     plt.rcParams.update(BASE_RC)
     plt.rcParams["figure.dpi"] = dpi
 
-    date_str = date_str or infer_date(csv_path)
     df = load_floorsheet(csv_path, broker_map)
+    date_str = date_str or derive_trade_date(df) or infer_date(csv_path)
     a = build_analytics(df, date_str)
 
     cdir = os.path.join(outdir, "charts")

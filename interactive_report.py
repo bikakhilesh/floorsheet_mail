@@ -683,16 +683,51 @@ def prune(reports_dir: str, keep: int) -> list[str]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Interactive floor sheet dashboard")
-    ap.add_argument("--csv", required=True)
+    ap.add_argument("--csv", "--data", dest="csv", required=True,
+                    help="floor sheet: .parquet, .csv, or .csv.gz")
     ap.add_argument("--out", default="docs/reports", help="reports directory")
     ap.add_argument("--index", default=None, help="also write a Pages index here")
     ap.add_argument("--keep", type=int, default=40, help="reports to retain")
     ap.add_argument("--brokers", default=None)
     ap.add_argument("--date", default=None)
+    ap.add_argument("--require-fresh", action="store_true",
+                    help="abort unless the sheet is the current NPT session")
+    ap.add_argument("--max-age-days", type=int, default=0,
+                    help="tolerated age when --require-fresh is set")
+    ap.add_argument("--to-parquet", default=None,
+                    help="also write the sheet to this parquet path")
+    ap.add_argument("--probe", action="store_true",
+                    help="print date/fresh/rows as key=value and exit; "
+                         "no report is written")
     args = ap.parse_args(argv)
 
-    date_str = args.date or fv.infer_date(args.csv)
     df = fv.load_floorsheet(args.csv, args.brokers)
+    derived = fv.derive_trade_date(df)
+    date_str = args.date or derived or fv.infer_date(args.csv)
+    ok, age, msg = fv.freshness(date_str, args.max_age_days)
+
+    fname_date = fv.filename_date(args.csv)
+    if derived and fname_date and fname_date != derived:
+        print(f"WARNING: filename says {fname_date}, contract numbers say "
+              f"{derived}. Trusting the contract numbers.")
+
+    if args.probe:
+        print(f"date={date_str}")
+        print(f"fresh={'true' if ok else 'false'}")
+        print(f"age_days={age}")
+        print(f"rows={len(df)}")
+        print(f"turnover={df['amount'].sum():.2f}")
+        print(msg)
+        return 0
+
+    print(msg)
+    if args.require_fresh and not ok:
+        return 3
+
+    if args.to_parquet:
+        p = fv.save_parquet(df, args.to_parquet)
+        print(f"Parquet: {p} ({os.path.getsize(p) / 1024:,.0f} KB)")
+
     a = fv.build_analytics(df, date_str)
 
     os.makedirs(args.out, exist_ok=True)

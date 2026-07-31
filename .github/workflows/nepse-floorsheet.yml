@@ -63,24 +63,35 @@ jobs:
           mkdir -p data
           python floorsheet_scrape_and_mail.py
 
-      - name: Resolve CSV
-        id: pick
+      # The report must come from THIS run's scrape. --probe reads the trading
+      # date out of the contract numbers (the exchange's own numbering, not the
+      # filename) and compares it to today in Nepal time. A holiday, a cached
+      # page, or a scraper that silently returned the previous session all show
+      # up here as fresh=false, and everything downstream is skipped.
+      - name: Probe the scraped sheet
+        id: probe
         if: always()
         run: |
           CSV=$(ls -1 data/*.csv 2>/dev/null | sort | tail -n 1 || true)
-          if [ -s "$CSV" ]; then
-            echo "csv=$CSV"   >> "$GITHUB_OUTPUT"
-            echo "found=true" >> "$GITHUB_OUTPUT"
-            echo "Using $CSV ($(( $(wc -l < "$CSV") - 1 )) rows)"
-          else
+          if [ ! -s "$CSV" ]; then
             echo "found=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::No CSV produced — skipping analytics."
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No floor sheet produced — skipping analytics."
+            exit 0
+          fi
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "csv=$CSV"   >> "$GITHUB_OUTPUT"
+          python interactive_report.py --data "$CSV" --probe | tee /tmp/probe.txt
+          grep -E '^(date|fresh|age_days|rows|turnover)=' /tmp/probe.txt >> "$GITHUB_OUTPUT"
+          if ! grep -q '^fresh=true' /tmp/probe.txt; then
+            echo "::warning::Floor sheet is not the current session — \
+          skipping publish and mail. This is expected on a market holiday."
           fi
 
       - name: Build interactive dashboard for the site
-        if: steps.pick.outputs.found == 'true'
+        if: steps.probe.outputs.fresh == 'true'
         run: |
-          mkdir -p site/reports
+          mkdir -p site/reports out
           # Seed from the live site so the archive accumulates across days.
           if git clone --depth 1 --branch gh-pages \
                "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
@@ -89,13 +100,18 @@ jobs:
           else
             echo "No gh-pages branch yet — starting a fresh site."
           fi
+          # --require-fresh is belt-and-braces: the gate above already checked,
+          # but this makes the guarantee hold when the script is run by hand.
+          # --to-parquet keeps a compact copy (~30% of the csv) in the artifact.
           python interactive_report.py \
-            --csv "${{ steps.pick.outputs.csv }}" \
-            --out site/reports --index site/index.html --keep 40
+            --data "${{ steps.probe.outputs.csv }}" \
+            --out site/reports --index site/index.html --keep 40 \
+            --require-fresh \
+            --to-parquet "out/floorsheet_${{ steps.probe.outputs.date }}.parquet"
           touch site/.nojekyll
 
       - name: Publish to GitHub Pages
-        if: steps.pick.outputs.found == 'true'
+        if: steps.probe.outputs.fresh == 'true'
         run: |
           set -euo pipefail
           cd site
@@ -112,7 +128,7 @@ jobs:
             main:gh-pages
 
       - name: Build charts and send mail
-        if: steps.pick.outputs.found == 'true'
+        if: steps.probe.outputs.fresh == 'true'
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PW: ${{ secrets.GMAIL_APP_PW }}
@@ -121,7 +137,7 @@ jobs:
           MPLBACKEND: Agg
         run: |
           python mail_floorsheet.py \
-            --csv "${{ steps.pick.outputs.csv }}" \
+            --data "${{ steps.probe.outputs.csv }}" \
             --outdir out --top 20 --dpi 120 \
             --pages-url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
 
@@ -135,6 +151,7 @@ jobs:
             out/tables/*.csv
             out/dashboard_*.html
             out/floorsheet_*.html
+            out/*.parquet
           retention-days: 30
           if-no-files-found: ignore
 
@@ -144,7 +161,7 @@ jobs:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PW: ${{ secrets.GMAIL_APP_PW }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
-          MAILED: ${{ steps.pick.outputs.found }}
+          MAILED: ${{ steps.probe.outputs.fresh }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           python - <<'PY'
