@@ -16,8 +16,11 @@ name: nepse-floorsheet
 
 on:
   schedule:
-    # 10:15 UTC = 16:00 NPT. NEPSE trades Sunday–Thursday (cron 0 = Sunday).
-    - cron: '15 10 * * 0,1,2,3,4'
+    # 10:15 UTC = 16:00 NPT, Monday–Friday.
+    # NEPSE moved from a Sunday–Thursday week to Monday–Friday in April 2026:
+    # the archive's last Sunday session is 2026-04-05 and its first Friday is
+    # 2026-04-10, with no overlap. Running Sun–Thu missed every Friday.
+    - cron: '15 10 * * 1,2,3,4,5'
   workflow_dispatch:
 
 permissions:
