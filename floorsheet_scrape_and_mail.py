@@ -34,7 +34,15 @@ from selenium.common.exceptions import (
 # ── CONFIG ──
 HEADLESS = True
 PARSER = "lxml"
-MAX_VERIFY_ATTEMPTS = 7
+MAX_VERIFY_ATTEMPTS = 20
+# Hard wall-clock ceiling on the verify/retry loop, in seconds. Whichever of
+# MAX_VERIFY_ATTEMPTS / VERIFY_BUDGET_SEC hits first stops the loop. This exists
+# so the job never gets killed by the Actions timeout mid-retry — if that
+# happens, send_mail() never runs and you lose the data AND the alert.
+# Keep this comfortably below (timeout-minutes * 60) in the workflow.
+VERIFY_BUDGET_SEC = 3600
+TOLERANCE_ABS = 100.0
+TOLERANCE_REL = 1e-6
 OUTPUT_DIR = tempfile.gettempdir()      # runner temp; wiped after the job
 LIMIT = 500
 STABLE_POLL = 0.15
@@ -284,6 +292,7 @@ def main():
     status = "OK"
     saved_path = None
     rows = 0
+    verify_attempts = 0
     expected_amount = actual_amount = 0.0
 
     try:
@@ -298,18 +307,47 @@ def main():
             raise RuntimeError("No rows scraped — NEPSE may have blocked the runner IP.")
         actual_amount = df["Amount (Rs)"].sum()
 
-        counter = 1
-        while abs(expected_amount - actual_amount) > 100 and counter < MAX_VERIFY_ATTEMPTS:
-            print(f"Wrong Data! Attempt {counter}")
-            counter += 1
-            driver = make_driver()
-            setup_floorsheet_page(driver)
-            all_data = scrape_all_pages(driver)
-            driver.quit()
-            df = pd.DataFrame(all_data)
-            actual_amount = df["Amount (Rs)"].sum()
+        tol = max(TOLERANCE_ABS, TOLERANCE_REL * abs(expected_amount))
 
-        if abs(expected_amount - actual_amount) > 100:
+        # Keep the closest attempt seen so far, so a MISMATCH still emails the
+        # best available snapshot rather than whatever the last attempt returned.
+        best_df, best_diff = df, abs(expected_amount - actual_amount)
+
+        counter = 1
+        while best_diff > tol and counter < MAX_VERIFY_ATTEMPTS:
+            elapsed_s = (datetime.now() - start_time).total_seconds()
+            if elapsed_s > VERIFY_BUDGET_SEC:
+                print(f"Verify budget exhausted after {elapsed_s:.0f}s "
+                      f"({counter - 1} retries). Emailing best attempt.")
+                break
+
+            print(f"Wrong Data! Attempt {counter} (diff Rs {best_diff:,.2f}, "
+                  f"{elapsed_s:.0f}s elapsed)")
+            counter += 1
+            driver = None
+            try:
+                driver = make_driver()
+                setup_floorsheet_page(driver)
+                all_data = scrape_all_pages(driver)
+            finally:
+                if driver is not None:
+                    try:
+                        driver.quit()
+                    except Exception:
+                        pass
+
+            attempt_df = pd.DataFrame(all_data)
+            if attempt_df.empty:
+                continue
+            attempt_diff = abs(expected_amount - attempt_df["Amount (Rs)"].sum())
+            if attempt_diff < best_diff:
+                best_df, best_diff = attempt_df, attempt_diff
+
+        df = best_df
+        actual_amount = df["Amount (Rs)"].sum()
+        verify_attempts = counter
+
+        if best_diff > tol:
             status = "MISMATCH"
         else:
             print("Correct Data Downloaded")
@@ -339,6 +377,8 @@ def main():
         f"Expected turnover: Rs {expected_amount:,.2f}\n"
         f"Scraped turnover:  Rs {actual_amount:,.2f}\n"
         f"Difference:        Rs {diff:,.2f}\n"
+        f"Verify attempts:   {verify_attempts} (cap {MAX_VERIFY_ATTEMPTS}, "
+        f"budget {VERIFY_BUDGET_SEC}s)\n"
         f"Run time:          {elapsed}\n"
         f"\n{analysis_text}\n"
     )
