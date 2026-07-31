@@ -110,6 +110,35 @@ jobs:
             --to-parquet "out/floorsheet_${{ steps.probe.outputs.date }}.parquet"
           touch site/.nojekyll
 
+      # The parquet copy has to outlive the 30-day artifact retention, so it is
+      # committed to a `data` branch. Orphan + force-push means the repo carries
+      # the current file set once instead of a fresh copy of history every day.
+      - name: Archive parquet to the data branch
+        if: steps.probe.outputs.fresh == 'true'
+        run: |
+          set -euo pipefail
+          URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          if git clone --quiet --depth 1 --branch data "$URL" archive; then
+            rm -rf archive/.git
+          else
+            echo "No data branch yet — creating it."
+            mkdir -p archive/parquet
+          fi
+          python floorsheet_archive.py add \
+            --file "out/floorsheet_${{ steps.probe.outputs.date }}.parquet" \
+            --dir archive/parquet \
+            --manifest archive/manifest.csv \
+            --readme archive/README.md \
+            --repo "https://github.com/${{ github.repository }}.git"
+          cd archive
+          git init -q
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q --orphan main
+          git add -A
+          git commit -q -m "Floor sheet archive through ${{ steps.probe.outputs.date }}"
+          git push -q --force "$URL" main:data
+
       - name: Publish to GitHub Pages
         if: steps.probe.outputs.fresh == 'true'
         run: |

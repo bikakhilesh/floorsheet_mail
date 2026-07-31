@@ -2,5 +2,6 @@ data/
 out/
 site/
 site_old/
+archive/
 __pycache__/
 *.pyc

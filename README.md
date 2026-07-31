@@ -143,6 +143,56 @@ Payload is aggregates, not raw trades: broker summary, scrip summary,
 broker×scrip cells above Rs 1 lakh gross, the top 1,200 broker pairs and the
 top 300 contracts. That is what keeps it a few hundred KB rather than several MB.
 
+## Parquet archive
+
+Every session is committed to the **`data` branch** as parquet, one file per
+trading day, with a `manifest.csv` index and a generated `README.md`:
+
+```
+data branch
+├── parquet/floorsheet_2026-07-30.parquet
+├── manifest.csv        date, rows, turnover, volume, scrips, brokers, bytes
+└── README.md           session count, span, size, recent sessions
+```
+
+Artifacts expire after 30 days, which is useless for a long series, so the
+archive lives on a branch instead. `floorsheet_archive.py add` copies the file
+in and appends one manifest row — it only opens the new file, so the step stays
+constant-time as the archive grows.
+
+### Pulling data back out
+
+```bash
+git clone --branch data --depth 1 https://github.com/bikakhilesh/floorsheet_mail.git fs-data
+
+# a date range as one frame
+python floorsheet_archive.py panel --dir fs-data/parquet \
+    --from 2026-07-01 --to 2026-07-30 --out panel.parquet
+
+# broker-day: date, broker, buy, sell, gross, net
+python floorsheet_archive.py panel --dir fs-data/parquet --by broker --out brokers.csv
+
+# scrip-day: date, symbol, turnover, volume, trades, high, low, last, vwap
+python floorsheet_archive.py panel --dir fs-data/parquet --by scrip --out scrips.csv
+```
+
+The broker-day and scrip-day frames are the ones worth keeping around — a
+250-session year of broker-day is about 25,000 rows, small enough to hold in
+memory and pivot however you like.
+
+### Size
+
+A session is roughly 0.6 MB as parquet against 2.0 MB as csv, so a 250-session
+year costs about 150 MB. The branch is force-pushed as a single orphan commit,
+so the repo stores the current file set once rather than accumulating a new copy
+of history each day. `--keep N` caps the retained sessions if you ever want a
+ceiling; the default keeps everything.
+
+One cost to know about: the workflow shallow-clones the branch each run to
+append to it, so once the archive is a year deep that step is pulling ~150 MB a
+day. If that ever gets annoying, the fix is sharding by year and cloning only
+the current shard.
+
 ## Mail integration
 
 Env vars: `SMTP_HOST` (default `smtp.gmail.com`), `SMTP_PORT` (587),
