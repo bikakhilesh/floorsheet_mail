@@ -49,6 +49,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formatdate, make_msgid
 
+import dashboard_site as ds
 import floorsheet_viz as fv
 import interactive_report as ir
 
@@ -155,6 +156,10 @@ def main(argv=None) -> int:
                     help="status word prefixed to the subject, e.g. MISMATCH")
     ap.add_argument("--pages-url", default=os.environ.get("PAGES_URL") or None,
                     help="GitHub Pages site root; the dashboard link is built from it")
+    ap.add_argument("--site", default=None,
+                    help="built site directory; enables the multi-day attachment")
+    ap.add_argument("--offline-days", type=int, default=22,
+                    help="sessions to embed in the attachment (0 = all)")
     ap.add_argument("--no-interactive", action="store_true",
                     help="skip building/attaching the interactive dashboard")
     ap.add_argument("--dry-run", action="store_true",
@@ -173,11 +178,18 @@ def main(argv=None) -> int:
 
     attachments = [res["html"]]
     if not args.no_interactive:
-        interactive = ir.build_interactive(
-            a, os.path.join(args.outdir, f"dashboard_{a.date}.html"))
+        out = os.path.join(args.outdir, f"dashboard_{a.date}.html")
+        if args.site and os.path.isdir(os.path.join(args.site, "data", "day")):
+            # Multi-day copy with the timeline slicer, built from the site data
+            interactive = ds.build_offline(args.site, out, args.offline_days)
+            note = f"{args.offline_days or 'all'} sessions, timeline"
+        else:
+            # No site data available — fall back to the single-day file
+            interactive = ir.build_interactive(a, out)
+            note = "single day"
         attachments.insert(0, interactive)
         print(f"Dashboard: {interactive} "
-              f"({os.path.getsize(interactive) / 1024:,.0f} KB)")
+              f"({os.path.getsize(interactive) / 1e6:.2f} MB, {note})")
 
     with open(res["email_body"], encoding="utf-8") as f:
         body_html = f.read()

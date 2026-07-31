@@ -154,10 +154,24 @@ first time Trends is opened.
 A rebuild reuses per-day JSON from the live site and only computes the new
 session: 107 sessions cold takes about 70 seconds, warm about 1 second.
 
-**`interactive_report.py` — the mail attachment.** A single self-contained file
-for one day, everything inlined, no `fetch()`. That is what makes it work
-opened straight from an attachment with no network. The site app cannot do this
-because it fetches per-day JSON, and mail clients strip scripts anyway.
+**The mail attachment.** The same app with the last 22 sessions embedded, built
+by `dashboard_site.py --offline`. It carries the timeline slicer and the full
+range aggregation, and needs no network at all — open the attachment and it
+runs in the browser. The payload is gzipped before base64 because a month of
+raw JSON is 4.9 MB against 2.6 MB compressed; the browser inflates it with
+`DecompressionStream`.
+
+```bash
+python dashboard_site.py --archive archive/parquet --out site \
+    --offline out/dashboard.html --offline-days 22
+```
+
+`--offline-days 0` embeds everything, at roughly 0.12 MB per session. Mail
+clients strip scripts, so this still cannot be the mail *body* — it has to be
+an attachment or the Pages link.
+
+`interactive_report.py` remains as the single-day fallback, used automatically
+when no site data is available.
 
 ### Input formats
 

@@ -371,8 +371,24 @@ footer{color:var(--grey);font-size:11.5px;border-top:1px solid var(--line);
 
 <script>
 const CR=1e7, LAKH=1e5;
-let IDX=null, PANEL=null, DAY=null, DATE=null, RANGE=null;
+const EMBED_GZ=__EMBED__;          // null on the site, gzip+base64 when offline
+let IDX=null, PANEL=null, DAY=null, DATE=null, RANGE=null, EMB=null;
 const CACHE=new Map();
+
+async function inflate(b64){
+  if(typeof DecompressionStream==='undefined')
+    throw new Error('This browser cannot decompress the embedded data. '+
+      'Open the online dashboard instead.');
+  const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+  const st=new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return JSON.parse(await new Response(st).text());
+}
+async function getDay(date){
+  if(!CACHE.has(date))
+    CACHE.set(date, EMB ? EMB.days[date]
+                        : await (await fetch(`data/day/${date}.json`)).json());
+  return CACHE.get(date);
+}
 
 function npr(x,pre){pre=pre===undefined?'Rs ':pre;
  if(x===null||x===undefined||isNaN(x))return '—';
@@ -389,7 +405,15 @@ const rowsOf=(p,k)=>{const c=p.cols[k];return p[k].map(r=>{const o={};c.forEach(
 
 /* ---------- boot ---------- */
 async function boot(){
-  IDX=await (await fetch('data/index.json')).json();
+  if(EMBED_GZ){
+    $('#load').classList.add('on'); $('#load').textContent='Unpacking…';
+    try{ EMB=await inflate(EMBED_GZ); }
+    catch(e){ $('#load').textContent=e.message; return; }
+    IDX=EMB.index; PANEL=EMB.panel;
+    $('#load').classList.remove('on'); $('#load').textContent='Loading…';
+  } else {
+    IDX=await (await fetch('data/index.json')).json();
+  }
   const sel=$('#daySel');
   sel.innerHTML=IDX.dates.slice().reverse().map(d=>`<option value="${d}">${d}</option>`).join('');
   $('#dayDate').min=IDX.dates[0]; $('#dayDate').max=IDX.dates[IDX.dates.length-1];
@@ -408,7 +432,8 @@ async function boot(){
     TL.sel=[Math.max(0,i),Math.max(0,i)];
     renderTimeline(); await show(d);
   }
-  $('#foot').innerHTML='Broker net is a house-level proxy — the floor sheet does not '+
+  offlineNote();
+  $('#foot').innerHTML+='Broker net is a house-level proxy — the floor sheet does not '+
    'disclose client identity, and offsetting client orders net out inside a broker code. '+
    'Cross trades are typically negotiated transfers; screen them before reading flow. '+
    'NEPSE publishes no trade timestamp, so "last" is the final contract in sequence order. '+
@@ -504,9 +529,7 @@ async function showRange(from,to){
     const days=[];
     for(let i=0;i<sel.length;i++){
       $('#load').textContent=`Loading ${i+1} of ${sel.length}…`;
-      if(!CACHE.has(sel[i]))
-        CACHE.set(sel[i],await (await fetch(`data/day/${sel[i]}.json`)).json());
-      days.push(CACHE.get(sel[i]));
+      days.push(await getDay(sel[i]));
     }
     DAY=mergeDays(days,sel); DATE=sel[sel.length-1]; RANGE=sel;
     history.replaceState(null,'',`#${from}..${to}`);
@@ -521,9 +544,7 @@ async function show(date){
   if(!IDX.dates.includes(date))return;
   $('#load').classList.add('on');
   try{
-    if(!CACHE.has(date))
-      CACHE.set(date,await (await fetch(`data/day/${date}.json`)).json());
-    DAY=CACHE.get(date); DATE=date; RANGE=null;
+    DAY=await getDay(date); DATE=date; RANGE=null;
     $('#daySel').value=date; $('#dayDate').value=date;
     history.replaceState(null,'','#'+date);
     const i=IDX.dates.indexOf(date);
@@ -781,6 +802,12 @@ function barChart(labels,vals,onClick,markIdx){
 async function ensurePanel(){
   if(!PANEL)PANEL=await (await fetch('data/panel.json')).json();
   return PANEL;}
+function offlineNote(){
+  if(!EMB)return;
+  $('#foot').insertAdjacentHTML('afterbegin',
+    `<div style="background:#FBF1D2;color:#7A5F02;padding:7px 10px;border-radius:4px;
+      margin-bottom:10px"><b>Offline copy</b> — the ${IDX.dates.length} most recent
+      sessions are embedded in this file. The full archive is online.</div>`);}
 async function renderTrends(){
   await ensurePanel();
   const d=IDX.dates, mark=d.indexOf(DATE);
@@ -957,11 +984,57 @@ boot();
 
 
 def build_app(out: str) -> str:
+    """The Pages app: fetches its data from data/*.json alongside it."""
     p = os.path.join(out, "index.html")
     os.makedirs(out, exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
-        f.write(APP)
+        f.write(APP.replace("__EMBED__", "null"))
     return p
+
+
+def build_offline(site_dir: str, out_html: str, days: int = 22) -> str:
+    """The same app with the last N sessions embedded, for the mail attachment.
+
+    Mail clients strip scripts, so this cannot be the body — but opening the
+    attachment hands it to the browser, where it runs with no network at all.
+    The payload is gzipped before base64 because raw JSON for a month is 4.9 MB
+    against 2.6 MB compressed.
+    """
+    import base64
+    import gzip
+
+    ddir = os.path.join(site_dir, "data", "day")
+    with open(os.path.join(site_dir, "data", "index.json"), encoding="utf-8") as f:
+        index = json.load(f)
+    with open(os.path.join(site_dir, "data", "panel.json"), encoding="utf-8") as f:
+        panel = json.load(f)
+
+    sel = index["dates"][-days:] if days > 0 else index["dates"]
+    keep = set(sel)
+    payload = {
+        "index": {"dates": sel, "kpi": {d: index["kpi"][d] for d in sel}},
+        "panel": {
+            "dates": [d for d in panel["dates"] if d in keep],
+            "brokers": {}, "scrips": {},
+        },
+        "days": {},
+    }
+    mask = [i for i, d in enumerate(panel["dates"]) if d in keep]
+    for grp in ("brokers", "scrips"):
+        for key, cols in panel[grp].items():
+            payload["panel"][grp][key] = [[c[i] for i in mask] for c in cols]
+    for d in sel:
+        with open(os.path.join(ddir, f"{d}.json"), encoding="utf-8") as f:
+            payload["days"][d] = json.load(f)
+
+    blob = base64.b64encode(
+        gzip.compress(json.dumps(payload, separators=(",", ":")).encode(), 6)
+    ).decode()
+    html = APP.replace("__EMBED__", '"' + blob + '"')
+    os.makedirs(os.path.dirname(os.path.abspath(out_html)), exist_ok=True)
+    with open(out_html, "w", encoding="utf-8") as f:
+        f.write(html)
+    return out_html
 
 
 def main(argv=None) -> int:
@@ -970,10 +1043,18 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default="site")
     ap.add_argument("--rebuild", action="store_true",
                     help="regenerate every per-day file, not just the missing ones")
+    ap.add_argument("--offline", default=None,
+                    help="also write a self-contained html here, for mailing")
+    ap.add_argument("--offline-days", type=int, default=22,
+                    help="sessions to embed in the offline copy (0 = all)")
     args = ap.parse_args(argv)
 
     info = build_site_data(args.archive, args.out, args.rebuild)
     build_app(args.out)
+    if args.offline:
+        p = build_offline(args.out, args.offline, args.offline_days)
+        print(f"Offline copy: {p} ({os.path.getsize(p) / 1e6:.2f} MB, "
+              f"{args.offline_days or info['n']} sessions)")
     total = sum(os.path.getsize(os.path.join(dp, f))
                 for dp, _, fs in os.walk(args.out) for f in fs)
     print(f"\nSite: {args.out}  ({info['n']} sessions, {total / 1e6:.1f} MB)")
