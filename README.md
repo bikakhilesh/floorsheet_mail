@@ -162,10 +162,20 @@ constant-time as the archive grows.
 
 ### Backfilling an existing dump
 
+One time only. The daily workflow appends after that — it never runs `ingest`.
+
 ```bash
-python floorsheet_archive.py ingest --src "/d/analysis/Floorsheet" \
-    --dir archive/parquet --manifest archive/manifest.csv --dry-run
+cd ~/floorsheet_mail
+bash backfill_archive.sh "/d/analysis/Floorsheet"           # convert, review
+bash backfill_archive.sh "/d/analysis/Floorsheet" --push    # publish to data
 ```
+
+The script builds the archive in `~/fs-archive-build`, outside the repo, so it
+cannot commit to or force-push your code branch. It refuses to start if it is
+not in the repo root, if the dump folder does not exist, or if no working Python
+is on PATH — on Windows a bare `python` is often the Microsoft Store alias stub
+that prints "Python was not found", so the script probes `py`, `python3` and
+`python` and uses whichever actually runs.
 
 Each file's session date comes from its **contract numbers**, so filenames need
 no convention — `2026.07.30.csv`, `floorsheet_2026-07-30.csv` and `dump_003.csv`
@@ -177,15 +187,6 @@ claiming the same session keep the one with more rows, which is what you want
 when a dump holds both a partial and a complete capture of the same day.
 Re-running skips sessions already archived unless you pass `--overwrite`, so it
 is safe to repeat.
-
-Drop `--dry-run` to write, then push the result to the data branch:
-
-```bash
-cd archive
-git init && git checkout --orphan main && git add -A
-git commit -m "Backfill floor sheet archive"
-git push --force https://github.com/bikakhilesh/floorsheet_mail.git main:data
-```
 
 ### Pulling data back out
 
