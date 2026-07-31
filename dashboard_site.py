@@ -220,6 +220,27 @@ h3.sec{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--g
 #load{position:fixed;inset:0;background:rgba(247,249,252,.75);display:none;
  align-items:center;justify-content:center;z-index:70;font-weight:600;color:var(--navy)}
 #load.on{display:flex}
+#timeline{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+ border-radius:6px;padding:8px 10px 6px;margin:8px 0 4px}
+.tlbar{display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap}
+.tlbar b{font-size:13px}
+.tlbar .sub{color:#9FB3C8;font-size:11.5px}
+.tlbar select,.tlbar button{font:600 12px inherit;padding:3px 8px;border-radius:4px;
+ border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.10);color:#fff;
+ cursor:pointer}
+.tlbar select option{color:#000}
+#tlTrack{position:relative;height:46px;cursor:crosshair;touch-action:none;
+ border-bottom:1px solid rgba(255,255,255,.18)}
+#tlTrack .bk{position:absolute;bottom:0;background:#8FA6BF;border-radius:1px 1px 0 0}
+#tlTrack .bk.on{background:var(--gold)}
+#tlSel{position:absolute;top:0;bottom:0;background:rgba(201,162,39,.16);
+ border-left:2px solid var(--gold);border-right:2px solid var(--gold);pointer-events:none}
+.tlh{position:absolute;top:0;bottom:0;width:11px;margin-left:-5px;cursor:ew-resize;
+ z-index:3}
+.tlh:after{content:"";position:absolute;left:3px;top:50%;margin-top:-9px;width:5px;
+ height:18px;background:var(--gold);border-radius:2px}
+#tlAxis{position:relative;height:14px;color:#9FB3C8;font-size:10px}
+#tlAxis span{position:absolute;transform:translateX(-50%);white-space:nowrap}
 svg.chart{width:100%;height:210px;display:block}
 svg.chart .ax{stroke:#C7CEDB;stroke-width:1}
 svg.chart .gl{stroke:#EDF1F7;stroke-width:1}
@@ -231,10 +252,6 @@ footer{color:var(--grey);font-size:11.5px;border-top:1px solid var(--line);
 <header><div class="wrap">
   <h1>NEPSE Floor Sheet Analytics</h1>
   <div class="picker">
-    <select id="mode" title="Analyse one session or aggregate a range">
-      <option value="day">Single day</option>
-      <option value="range">Date range</option>
-    </select>
     <span id="dayCtl">
       <button id="prev" title="Previous session">&lsaquo;</button>
       <select id="daySel"></select>
@@ -242,16 +259,25 @@ footer{color:var(--grey);font-size:11.5px;border-top:1px solid var(--line);
       <button id="next" title="Next session">&rsaquo;</button>
       <button id="latest">Latest</button>
     </span>
-    <span id="rangeCtl" style="display:none">
-      <input type="date" id="fromDate"> <span style="color:#9FB3C8">to</span>
-      <input type="date" id="toDate">
-      <button id="applyRange">Apply</button>
-      <button class="preset" data-n="5">5d</button>
-      <button class="preset" data-n="22">1m</button>
-      <button class="preset" data-n="66">3m</button>
-      <button class="preset" data-n="0">All</button>
-    </span>
     <span class="meta" id="meta"></span>
+  </div>
+  <div id="timeline">
+    <div class="tlbar">
+      <b id="tlLabel">—</b><span class="sub" id="tlSub"></span>
+      <span style="flex:1"></span>
+      <select id="tlLevel">
+        <option value="day">Days</option>
+        <option value="week">Weeks</option>
+        <option value="month" selected>Months</option>
+        <option value="quarter">Quarters</option>
+      </select>
+      <button id="tlAll">Select all</button>
+    </div>
+    <div id="tlTrack">
+      <div id="tlSel"></div>
+      <div class="tlh" id="tlH0"></div><div class="tlh" id="tlH1"></div>
+    </div>
+    <div id="tlAxis"></div>
   </div>
   <div class="kpis" id="kpis"></div>
   <nav id="tabs">
@@ -367,14 +393,20 @@ async function boot(){
   const sel=$('#daySel');
   sel.innerHTML=IDX.dates.slice().reverse().map(d=>`<option value="${d}">${d}</option>`).join('');
   $('#dayDate').min=IDX.dates[0]; $('#dayDate').max=IDX.dates[IDX.dates.length-1];
+  buildBuckets();
   const want=location.hash.slice(1);
   if(want.includes('..')){
     const [f,t]=want.split('..');
-    $('#mode').value='range'; $('#dayCtl').style.display='none';
-    $('#rangeCtl').style.display=''; $('#fromDate').value=f; $('#toDate').value=t;
-    await showRange(f,t);
+    let i0=TL.buckets.findIndex(b=>b.to>=f), i1=TL.buckets.findIndex(b=>b.from>t);
+    TL.sel=[i0<0?0:i0,(i1<0?TL.buckets.length:i1)-1];
+    if(TL.sel[1]<TL.sel[0])TL.sel[1]=TL.sel[0];
+    renderTimeline(); await showRange(f,t);
   } else {
-    await show(IDX.dates.includes(want)?want:IDX.dates[IDX.dates.length-1]);
+    const d=IDX.dates.includes(want)?want:IDX.dates[IDX.dates.length-1];
+    TL.level='day'; $('#tlLevel').value='day'; buildBuckets();
+    const i=TL.buckets.findIndex(b=>b.key===d);
+    TL.sel=[Math.max(0,i),Math.max(0,i)];
+    renderTimeline(); await show(d);
   }
   $('#foot').innerHTML='Broker net is a house-level proxy — the floor sheet does not '+
    'disclose client identity, and offsetting client orders net out inside a broker code. '+
@@ -479,6 +511,7 @@ async function showRange(from,to){
     DAY=mergeDays(days,sel); DATE=sel[sel.length-1]; RANGE=sel;
     history.replaceState(null,'',`#${from}..${to}`);
     $('#meta').textContent=`${sel.length} session${sel.length>1?'s':''} aggregated`;
+    $('#daySel').value=sel[sel.length-1];
     renderAll();
   }catch(e){alert('Could not load the range: '+e.message);}
   finally{$('#load').classList.remove('on');$('#load').textContent='Loading…';}
@@ -496,6 +529,7 @@ async function show(date){
     const i=IDX.dates.indexOf(date);
     $('#prev').disabled=i<=0; $('#next').disabled=i>=IDX.dates.length-1;
     $('#meta').textContent=`session ${i+1} of ${IDX.dates.length}`;
+    syncTimelineToDay(date);
     renderAll();
   }catch(e){ alert('Could not load '+date+': '+e.message); }
   finally{ $('#load').classList.remove('on'); }
@@ -780,18 +814,121 @@ function drawScripTrend(){
     {unit:m==='vwap'?'':'L',mark:PANEL.dates.indexOf(DATE)});}
 
 /* ---------- wiring ---------- */
-$('#mode').onchange=e=>{
-  const r=e.target.value==='range';
-  $('#dayCtl').style.display=r?'none':''; $('#rangeCtl').style.display=r?'':'none';
-  if(r){ const d=IDX.dates, n=Math.min(22,d.length);
-    $('#fromDate').value=d[d.length-n]; $('#toDate').value=d[d.length-1];
-    showRange($('#fromDate').value,$('#toDate').value);
-  } else show(DATE||IDX.dates[IDX.dates.length-1]);};
-$('#applyRange').onclick=()=>showRange($('#fromDate').value,$('#toDate').value);
-document.querySelectorAll('.preset').forEach(b=>b.onclick=()=>{
-  const d=IDX.dates, n=+b.dataset.n||d.length;
-  const from=d[Math.max(0,d.length-n)], to=d[d.length-1];
-  $('#fromDate').value=from; $('#toDate').value=to; showRange(from,to);});
+/* ---------- timeline slicer ---------- */
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const TL={level:'month',buckets:[],sel:[0,0],drag:null,syncing:false};
+
+function bucketKey(d,level){
+  const y=+d.slice(0,4), m=+d.slice(5,7), day=+d.slice(8,10);
+  if(level==='day')return d;
+  if(level==='month')return d.slice(0,7);
+  if(level==='quarter')return y+'-Q'+Math.ceil(m/3);
+  const dt=new Date(Date.UTC(y,m-1,day));               // week: Monday start
+  dt.setUTCDate(dt.getUTCDate()-((dt.getUTCDay()+6)%7));
+  return dt.toISOString().slice(0,10);
+}
+function bucketLabel(key,level){
+  if(level==='day')  return MON[+key.slice(5,7)-1]+' '+(+key.slice(8,10));
+  if(level==='month')return MON[+key.slice(5,7)-1]+" '"+key.slice(2,4);
+  if(level==='quarter')return key.slice(5)+" '"+key.slice(2,4);
+  return MON[+key.slice(5,7)-1]+' '+(+key.slice(8,10));
+}
+function buildBuckets(){
+  const m=new Map();
+  IDX.dates.forEach(d=>{
+    const k=bucketKey(d,TL.level);
+    const b=m.get(k)||{key:k,label:bucketLabel(k,TL.level),dates:[],turnover:0};
+    b.dates.push(d); b.turnover+=IDX.kpi[d].turnover; m.set(k,b);
+  });
+  TL.buckets=[...m.values()].sort((a,b)=>a.key<b.key?-1:1);
+  TL.buckets.forEach(b=>{b.from=b.dates[0];b.to=b.dates[b.dates.length-1];});
+}
+function selDates(){
+  const a=TL.buckets[TL.sel[0]], b=TL.buckets[TL.sel[1]];
+  return IDX.dates.filter(d=>d>=a.from&&d<=b.to);
+}
+function renderTimeline(){
+  const track=$('#tlTrack'), n=TL.buckets.length;
+  const mx=Math.max(...TL.buckets.map(b=>b.turnover),1);
+  track.querySelectorAll('.bk').forEach(e=>e.remove());
+  const w=100/n;
+  TL.buckets.forEach((b,i)=>{
+    const el=document.createElement('div');
+    el.className='bk'+(i>=TL.sel[0]&&i<=TL.sel[1]?' on':'');
+    el.style.left=(i*w+w*0.12)+'%'; el.style.width=(w*0.76)+'%';
+    el.style.height=Math.max(3,42*b.turnover/mx)+'px';
+    el.title=b.label+' — '+npr(b.turnover*LAKH)+' · '+b.dates.length+' session(s)';
+    track.appendChild(el);
+  });
+  const l=TL.sel[0]*w, r=(TL.sel[1]+1)*w;
+  $('#tlSel').style.left=l+'%'; $('#tlSel').style.width=(r-l)+'%';
+  $('#tlH0').style.left=l+'%'; $('#tlH1').style.left=r+'%';
+  const step=Math.max(1,Math.ceil(n/14));
+  $('#tlAxis').innerHTML=TL.buckets.map((b,i)=>i%step?'':
+    `<span style="left:${(i*w+w/2)}%">${b.label}</span>`).join('');
+  const a=TL.buckets[TL.sel[0]], z=TL.buckets[TL.sel[1]];
+  $('#tlLabel').textContent=TL.sel[0]===TL.sel[1]?a.label:a.label+' – '+z.label;
+  const ds=selDates();
+  $('#tlSub').textContent=`${ds.length} session${ds.length>1?'s':''} · `+
+    `${ds[0]} to ${ds[ds.length-1]}`;
+}
+function applyTimeline(){
+  const ds=selDates();
+  if(!ds.length)return;
+  TL.syncing=true;
+  (ds.length===1?show(ds[0]):showRange(ds[0],ds[ds.length-1]))
+    .finally(()=>{TL.syncing=false;});
+}
+function idxFromX(clientX){
+  const r=$('#tlTrack').getBoundingClientRect();
+  return Math.max(0,Math.min(TL.buckets.length-1,
+    Math.floor((clientX-r.left)/r.width*TL.buckets.length)));
+}
+function startDrag(e,mode){
+  e.preventDefault();
+  const i=idxFromX(e.clientX);
+  TL.drag = mode==='h0' ? {anchor:TL.sel[1]}
+          : mode==='h1' ? {anchor:TL.sel[0]}
+          : {anchor:i};
+  if(mode==='track')TL.sel=[i,i];
+  moveDrag(e);
+  window.addEventListener('pointermove',moveDrag);
+  window.addEventListener('pointerup',endDrag,{once:true});
+}
+function moveDrag(e){
+  if(!TL.drag)return;
+  const i=idxFromX(e.clientX), a=TL.drag.anchor;
+  TL.sel=[Math.min(a,i),Math.max(a,i)];
+  renderTimeline();                       // instant feedback, no data loaded yet
+}
+function endDrag(){
+  window.removeEventListener('pointermove',moveDrag);
+  TL.drag=null;
+  applyTimeline();                        // load only once, on release
+}
+$('#tlTrack').addEventListener('pointerdown',e=>{
+  if(e.target.classList.contains('tlh'))return;
+  startDrag(e,'track');});
+$('#tlH0').addEventListener('pointerdown',e=>startDrag(e,'h0'));
+$('#tlH1').addEventListener('pointerdown',e=>startDrag(e,'h1'));
+$('#tlLevel').onchange=()=>{
+  const keep=selDates();
+  TL.level=$('#tlLevel').value; buildBuckets();
+  const from=keep[0], to=keep[keep.length-1];
+  let i0=TL.buckets.findIndex(b=>b.to>=from), i1=TL.buckets.findIndex(b=>b.from>to);
+  TL.sel=[i0<0?0:i0, (i1<0?TL.buckets.length:i1)-1];
+  if(TL.sel[1]<TL.sel[0])TL.sel[1]=TL.sel[0];
+  renderTimeline(); applyTimeline();};
+$('#tlAll').onclick=()=>{TL.sel=[0,TL.buckets.length-1];renderTimeline();applyTimeline();};
+
+/* Day controls stay authoritative for stepping one session at a time; using
+   them drops the timeline to day level so the two never disagree. */
+function syncTimelineToDay(date){
+  if(TL.syncing)return;
+  if(TL.level!=='day'){TL.level='day';$('#tlLevel').value='day';buildBuckets();}
+  const i=TL.buckets.findIndex(b=>b.key===date);
+  if(i>=0){TL.sel=[i,i];renderTimeline();}
+}
 $('#daySel').onchange=e=>show(e.target.value);
 $('#dayDate').onchange=e=>{ if(IDX.dates.includes(e.target.value))show(e.target.value);
   else{ const near=IDX.dates.filter(d=>d<=e.target.value).pop()||IDX.dates[0];

@@ -105,15 +105,25 @@ picker: dropdown, calendar input, prev/next buttons, left/right arrow keys, and
 python dashboard_site.py --archive archive/parquet --out site
 ```
 
-### Single day or a range
+### The timeline slicer
 
-The mode selector switches the whole app between one session and an aggregated
-window. In range mode you get two date inputs plus `5d` / `1m` / `3m` / `All`
-presets, and every tab then reports the aggregate: broker buy/sell/net summed
+Selection works like an Excel pivot-table timeline: a band of periods under the
+header showing turnover per period, which you drag across to select. Drag the
+gold handles at either edge to extend or trim, click a single period to select
+just it, and switch the granularity with the level selector — **Days, Weeks,
+Months, Quarters**. The bars redraw live while dragging; data loads once, on
+release.
+
+Selecting one session shows that session. Selecting more aggregates them, and
+every tab then reports the aggregate: broker buy/sell/net summed
 across sessions, scrip turnover and volume summed with VWAP recomputed from
 them, high and low taken across the window, the flow matrix summed, and the
 block-trade table gaining a Day column so you can see which session each print
 came from. The URL carries `#2026-06-30..2026-07-30`, so a window is linkable.
+
+The day dropdown and prev/next buttons still step one session at a time; using
+them drops the timeline to Days level and moves the selection, so the two
+controls never disagree about what is on screen.
 
 Aggregating a month is the point of the archive: a broker's net over one
 session is mostly noise, and over twenty it is a position. Medians are the one
@@ -121,7 +131,7 @@ figure that cannot be aggregated, so median ticket shows as `—` in range mode.
 
 Only the sessions in the window are downloaded, roughly 0.2 MB each — a month
 takes a few seconds, the full archive around 25. Ranges over 80 sessions ask
-for confirmation first.
+for confirmation first. Dragging is free: nothing is fetched until you let go.
 
 Tabs are Overview, Brokers, Scrips, Block trades, Flow matrix and **Trends**.
 Trends works across sessions rather than within one: market turnover per
