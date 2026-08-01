@@ -58,7 +58,12 @@ STATUS_OPTIONS = ["A", "S", "D"]          # Active / Suspended / Delisted
 PROMOTER_NEXT_CSS = "li.pagination-next:not(.disabled) a"
 PROMOTER_ROW_CSS = "table tbody tr"
 PROMOTER_SYM_CSS = "table tbody tr td:nth-child(3)"
+PROMOTER_PAGER_CSS = ".ngx-pagination li"
 MAX_PROMOTER_PAGES = 60
+# How many times a missing next-link is re-checked before it is believed. The
+# control disappears briefly mid-render, and treating that as "last page" is how
+# a walk truncates silently.
+NEXT_LINK_CONFIRMATIONS = 8
 
 STATUS_XPATH = ("/html/body/app-root/div/main/div/app-company/div/div[2]/div/"
                 "div[2]/select")
@@ -238,25 +243,74 @@ def _first_symbol(driver) -> str:
 
 
 def _click_next(driver) -> bool:
-    """Advance one page. False when there is no next link, i.e. the last page.
+    """Advance one page. False when there is no enabled next link.
 
     Same two-round-trip hazard as `_first_symbol`: locating the anchor and then
     clicking it are separate calls, and a re-render in between kills the handle.
     Query and click together.
+
+    False here is ambiguous on its own — see `_click_next_confirmed`.
     """
     return bool(driver.execute_script(
         "const a = document.querySelector(arguments[0]);"
         "if (!a) return false; a.click(); return true;", PROMOTER_NEXT_CSS))
 
 
+def _click_next_confirmed(driver) -> bool:
+    """As above, but only believes a missing next-link after re-checking.
+
+    A single false reading is ambiguous: it means "this is the last page" *or*
+    "the pagination control is mid-render and momentarily gone". Treating the
+    second as the first is how a walk stops at page eleven, returns 216 rows,
+    clears the row floor and commits a truncated register with the job green.
+    That is not hypothetical — it is what shipped.
+
+    The control comes back within a frame or two, so re-checking a few times
+    over two seconds separates the two cases without slowing a real last page
+    by more than that.
+    """
+    if _click_next(driver):
+        return True
+    for _ in range(NEXT_LINK_CONFIRMATIONS):
+        time.sleep(0.25)
+        if _click_next(driver):
+            return True
+    return False
+
+
+def _page_count(driver) -> int:
+    """Total pages according to the pager, or 0 if it cannot be read.
+
+    ngx-pagination always renders the last page number even when it elides the
+    middle, so this is available from page one and is the only completeness
+    check that does not depend on catching the pager at the right moment.
+    """
+    try:
+        return int(driver.execute_script(
+            "let mx = 0;"
+            "document.querySelectorAll(arguments[0]).forEach(li => {"
+            "  const m = (li.textContent || '').match(/\\d+/g);"
+            "  if (m) m.forEach(s => { const n = parseInt(s, 10);"
+            "                          if (n > mx) mx = n; });"
+            "});"
+            "return mx;", PROMOTER_PAGER_CSS) or 0)
+    except Exception:                                # noqa: BLE001
+        return 0
+
+
 def _walk_promoter(driver, wait) -> pd.DataFrame:
     """One complete walk of the promoter register, or an exception.
 
     Every early exit raises rather than returning what it has. A walk that gives
-    up at page eight still yields ~160 rows, which clears MIN_PROMOTER_ROWS and
+    up at page eleven still yields ~216 rows, which clears MIN_PROMOTER_ROWS and
     would quietly commit a truncated register — the same failure the caller is
     careful to avoid on the exception path, arriving through the success path
-    instead. The only clean ending is running out of pages.
+    instead.
+
+    Completeness is decided by the pager's own last page number, read before the
+    walk starts, not by whether a next-link happened to be visible on the last
+    read. The next-link is a timing observation; the page count is a fact about
+    the register.
     """
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support import expected_conditions as EC
@@ -264,6 +318,10 @@ def _walk_promoter(driver, wait) -> pd.DataFrame:
     driver.get(PROMOTER_URL)
     wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, PROMOTER_ROW_CSS)))
     time.sleep(1.5)
+
+    expected = _page_count(driver)
+    if expected:
+        print(f"  promoter register: {expected} page(s) to walk")
 
     frames, pages, complete = [], 0, False
     for _ in range(MAX_PROMOTER_PAGES):
@@ -275,8 +333,8 @@ def _walk_promoter(driver, wait) -> pd.DataFrame:
         except ValueError as e:
             raise RuntimeError(f"no table on promoter page {pages + 1}") from e
 
-        if not _click_next(driver):
-            complete = True                          # ran out of pages: done
+        if not _click_next_confirmed(driver):
+            complete = True                          # believed last page
             break
 
         for _ in range(40):                          # up to 10s for the re-render
@@ -291,6 +349,12 @@ def _walk_promoter(driver, wait) -> pd.DataFrame:
     if not complete:
         raise RuntimeError(f"promoter walk hit the {MAX_PROMOTER_PAGES}-page cap "
                            f"without reaching the end")
+    # The check that actually matters. Everything above is timing; this is not.
+    if expected and pages != expected:
+        raise RuntimeError(f"promoter walk covered {pages} of {expected} pages — "
+                           f"a truncated register, not a short one")
+    if not expected:
+        print("  warn: could not read the pager; completeness is unverified")
     if not frames:
         raise RuntimeError("promoter walk produced no rows")
 

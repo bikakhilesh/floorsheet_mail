@@ -105,11 +105,17 @@ Three things that walk has to get right, all learned the hard way:
 - **Advancing is confirmed, not assumed.** The poll watches the first symbol
   change rather than sleeping a fixed interval, because a fixed sleep races the
   re-render into silently re-reading the page you were already on.
-- **Every early exit raises.** A walk that gives up at page eight still returns
-  ~160 rows, clears the 150 floor, and would commit a truncated register with the
-  job green. The only clean ending is running out of pages; the walk is then
-  retried from page one up to three times, since a mistimed re-render is
-  uncorrelated between attempts.
+- **Every early exit raises.** A walk that gives up at page eleven still returns
+  216 rows, clears the 150 floor, and commits a truncated register with the job
+  green. The walk is retried from page one up to three times, since a mistimed
+  re-render is uncorrelated between attempts.
+- **Completeness is decided by the pager, not the next-link.** A missing
+  next-link means "last page" *or* "control is mid-render and momentarily gone",
+  and there is no way to tell from the reading itself. So the last page number is
+  read before the walk starts — ngx-pagination always renders it — and the walk
+  must cover that many pages or raise. The next-link is a timing observation; the
+  page count is a fact about the register. A missing link is also re-checked
+  eight times over two seconds before it is believed.
 
 - **No change → nothing happens.** No commit, no rebuild, no mail. The job goes
   green and stops.
@@ -265,6 +271,12 @@ from `panel.json` crashed the stacked area chart; an empty
 `sector_overrides.csv` raised rather than being ignored; and a truncated
 promoter walk returned partial data through the success path where the row floor
 could not see it.
+
+The one that got to production first: a single false reading of the pagination
+control ended a walk at page eleven and committed a 216-row register. The row
+floor could not catch it — 216 is a perfectly plausible number. Only counting
+pages against the pager catches that class of failure, which is why the test
+asserts on pages covered rather than rows returned.
 
 ---
 

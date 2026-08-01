@@ -67,15 +67,25 @@ class FakeWait:
 
 
 class FakeDriver:
-    """`pages` pages of 20. `stale_at` makes the symbol read raise once, the way
-    a dead element handle does. `stall_at` accepts the click but never advances.
+    """`pages` pages of 20.
+
+    `stale_at`   the symbol read raises once, the way a dead handle does
+    `stall_at`   the click lands but nothing re-renders
+    `vanish_at`  the next-link is missing for `vanish_for` consecutive reads,
+                 which is the pagination control being mid-render — the failure
+                 that shipped a 216-row register
+    `pager`      what the pager reports as the last page; None hides it
     """
 
-    def __init__(self, pages=15, stale_at=None, stall_at=None):
+    def __init__(self, pages=15, stale_at=None, stall_at=None,
+                 vanish_at=None, vanish_for=99, pager="real"):
         self.pages, self.page = pages, 0
         self.stale_at, self.stall_at = stale_at, stall_at
+        self.vanish_at, self.vanish_for = vanish_at, vanish_for
+        self.pager = pages if pager == "real" else pager
         self.clicks = 0
         self._stale_fired = False
+        self._vanished = 0
 
     # -- selenium surface the walk actually uses ---------------------------
     def get(self, _url):
@@ -85,9 +95,11 @@ class FakeDriver:
     def page_source(self):
         return page_html(self.page)
 
-    def execute_script(self, script, arg):
+    def execute_script(self, script, arg=None):
         if "a.click()" in script:
             return self._click()
+        if "textContent || ''" in script or "match(/\\d+/g)" in script:
+            return self.pager or 0
         return self._symbol()
 
     # -- behaviour ---------------------------------------------------------
@@ -103,6 +115,10 @@ class FakeDriver:
     def _click(self):
         if self.page >= self.pages - 1:
             return False                      # no next link on the last page
+        if self.vanish_at is not None and self.page == self.vanish_at \
+                and self._vanished < self.vanish_for:
+            self._vanished += 1
+            return False                      # control is mid-render, not absent
         self.clicks += 1
         if self.stall_at is not None and self.page == self.stall_at:
             return True                       # click lands, nothing re-renders
@@ -146,12 +162,27 @@ def main() -> int:
        "'Sector Name' normalised before it can collide with /company")
     ok("Security Name" not in df.columns, "the descriptive column is dropped")
 
+    print("\na next-link that vanishes mid-render is not the last page")
+    # This is the bug that shipped: one false reading of the pagination control
+    # ended the walk at page eleven with 216 rows and no exception.
+    d = FakeDriver(pages=15, vanish_at=10, vanish_for=3)
+    df = g._walk_promoter(d, w)
+    ok(len(df) == 300, "the walk re-checks and carries on", f"got {len(df)}")
+    expect_raises(
+        lambda: g._walk_promoter(FakeDriver(pages=15, vanish_at=10), w),
+        "11 of 15",
+        "a permanently missing link is caught by the page count, not the link")
+
     print("\ntruncation is not allowed to look like success")
     expect_raises(lambda: g._walk_promoter(FakeDriver(pages=15, stall_at=8), w),
                   "never advanced",
-                  "a stalled page raises instead of returning ~160 rows")
+                  "a stalled page raises instead of returning ~180 rows")
     expect_raises(lambda: g._walk_promoter(FakeDriver(pages=99), w),
                   "cap", "hitting the page cap raises")
+    ok(g._page_count(FakeDriver(pages=15)) == 15, "the pager is read")
+    d = FakeDriver(pages=15, pager=None)
+    ok(len(g._walk_promoter(d, w)) == 300,
+       "an unreadable pager falls back to the next-link rather than failing")
 
     print("\nstaleness")
     expect_raises(lambda: g._walk_promoter(FakeDriver(pages=15, stale_at=3), w),
