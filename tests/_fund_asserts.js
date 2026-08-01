@@ -125,6 +125,96 @@ ok($('#fdStale').innerHTML.indexOf('NOFUND') > 0,
    'and is named in the coverage banner instead of vanishing');
 ok($('#fdStale').innerHTML.indexOf('2026-07-30') > 0, 'the as-of date is shown');
 
+console.log('\nbubble charts');
+/* OLS against a line it must recover exactly, then against known scatter. */
+const exact = [];
+for (let i = 1; i <= 20; i++) exact.push({ x: i, y: 3 * i + 5 });
+const fe = ols(exact);
+ok(close(fe.b, 3, 1e-9) && close(fe.a, 5, 1e-9), 'OLS recovers a clean line',
+   'got b=' + fe.b + ' a=' + fe.a);
+ok(close(fe.r2, 1, 1e-9), 'and R² is 1 on a perfect fit', 'got ' + fe.r2);
+ok(ols([{ x: 1, y: 1 }]) === null, 'OLS declines fewer than three points');
+ok(ols([{ x: 2, y: 1 }, { x: 2, y: 5 }, { x: 2, y: 9 }]) === null,
+   'and declines a vertical column rather than dividing by zero');
+const noisy = [{ x: 1, y: 2 }, { x: 2, y: 3 }, { x: 3, y: 5 }, { x: 4, y: 4 }];
+const fn = ols(noisy);
+ok(fn.r2 > 0 && fn.r2 < 1, 'R² is strictly between 0 and 1 on real scatter',
+   'got ' + fn.r2);
+
+ok(close(pctl([1, 2, 3, 4, 5], 0), 1) && close(pctl([1, 2, 3, 4, 5], 1), 5),
+   'percentile bounds hit the ends');
+ok(pctl([], 0.5) === null, 'and an empty series has none');
+
+/* The identity the P/B vs P/E rays encode: P/B / P/E == ROE. */
+const idPts = [{ x: 10, y: 1.5, r: 1, label: 'A' }, { x: 20, y: 3.0, r: 1, label: 'B' }];
+ok(close(idPts[0].y / idPts[0].x, 0.15) && close(idPts[1].y / idPts[1].x, 0.15),
+   'both sample names sit on the same 15% ROE ray');
+
+const c1 = bubbleChart(
+  syms.slice(0, 60).map(s => {
+    const f = fund(s);
+    return { x: f.peD, y: f.pbv, r: f.mcap, label: s, color: '#0B2545',
+             tip: s };
+  }).filter(p => p.x > 0 && p.y > 0),
+  { log: true, iso: [0.10, 0.20], isoLabel: k => (100 * k) + '%', labelN: 5,
+    title: 'T', xlab: 'P/E', ylab: 'P/B' });
+ok(c1.svg.indexOf('<svg') === 0, 'the chart renders an svg');
+ok((c1.svg.match(/<circle/g) || []).length === c1.n, 'one bubble per name',
+   'got ' + (c1.svg.match(/<circle/g) || []).length + ' for ' + c1.n);
+ok((c1.svg.match(/class="iso"/g) || []).length === 2, 'both iso rays drawn');
+ok(c1.svg.indexOf('class="ols"') < 0, 'and no fit line when none was asked for');
+ok((c1.svg.match(/class="plab"/g) || []).length === 5, 'top 5 labelled');
+
+const c2 = bubbleChart(
+  [{ x: 1, y: 2, r: 1, label: 'A' }, { x: 2, y: 4, r: 1, label: 'B' },
+   { x: 3, y: 6, r: 1, label: 'C' }, { x: 4, y: 8, r: 1, label: 'D' }],
+  { log: false, fit: 'ols', labelN: 0, title: 'T' });
+ok(c2.fit !== null && close(c2.fit.b, 2, 1e-9), 'linear fit slope is right',
+   c2.fit && 'got ' + c2.fit.b);
+ok(c2.svg.indexOf('class="ols"') > 0, 'and the fit line is drawn');
+
+/* A single wild outlier must not be dropped, and must not set the scale. */
+const withOutlier = [];
+for (let i = 1; i <= 30; i++) withOutlier.push({ x: 10 + i * 0.1, y: 2, r: 1,
+                                                 label: 'N' + i });
+withOutlier.push({ x: 4000, y: 2, r: 1, label: 'WILD' });
+const c3 = bubbleChart(withOutlier, { log: false, labelN: 0 });
+ok(c3.off >= 1, 'the outlier is counted as off-scale', 'off=' + c3.off);
+ok((c3.svg.match(/<circle/g) || []).length === 31,
+   'but still drawn, pinned to the edge rather than hidden');
+
+/* Padding a log domain additively walks the low end to ~0 and every tick then
+   prints as 0.00. Caught by eye on the real data; asserted here so it stays
+   caught. */
+const logged = [];
+for (let i = 0; i < 40; i++) logged.push({ x: 5 + i, y: 1 + i * 0.05, r: 1,
+                                           label: 'N' + i });
+const c4 = bubbleChart(logged, { log: true, labelN: 0 });
+const zeroTicks = (c4.svg.match(/>0\.00</g) || []).length;
+ok(zeroTicks === 0, 'log axes do not degenerate to 0.00 ticks',
+   zeroTicks + ' zero ticks');
+// A 2-98% clip on 40 evenly spaced points necessarily puts the extreme one or
+// two outside the domain — that is the trimming doing its job, not a fault.
+// What matters is that a well-behaved series loses a handful, not a third.
+ok(c4.off <= 2, 'and a clean series pins at most the extremes',
+   'off=' + c4.off + ' of ' + c4.n);
+
+ok(bubbleChart([], {}).n === 0, 'an empty series degrades to a message');
+ok(bubbleChart([{ x: -1, y: 5, r: 1, label: 'A' }, { x: -2, y: 6, r: 1, label: 'B' },
+                { x: -3, y: 7, r: 1, label: 'C' }], { log: true }).n === 0,
+   'log axes drop non-positive values rather than producing NaN geometry');
+
+$('#fdFit').value = 'iso'; $('#fdScale').value = 'log'; $('#fdLabel').value = '20';
+try { renderFundCharts(fundRows()); ok(true, 'renderFundCharts runs'); }
+catch (e) { ok(false, 'renderFundCharts runs',
+                 e.message + ' | ' + e.stack.split('\n')[1]); }
+ok($('#fdPEPB').innerHTML.indexOf('<svg') === 0, 'P/B vs P/E drew');
+ok($('#fdROE').innerHTML.indexOf('<svg') === 0, 'ROE vs ROA drew');
+$('#fdFit').value = 'ols';
+renderFundCharts(fundRows());
+ok($('#fdPEPBFit').innerHTML.indexOf('R²') > 0, 'the OLS mode reports R²',
+   $('#fdPEPBFit').innerHTML);
+
 FUND = null;
 try { renderFund(); ok($('#fdStale').innerHTML.indexOf('No fundamentals') > 0,
                        'a missing snapshot says so rather than throwing'); }

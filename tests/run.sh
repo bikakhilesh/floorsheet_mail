@@ -43,3 +43,15 @@ python3 tests/test_promoter_walk.py
 echo
 echo "── fundamentals join ──"
 python3 tests/test_fundamentals.py
+
+echo
+echo "── preview svgs ──"
+cat tests/_stubs.js build/fund.js tests/_preview.js > build/preview.js
+python3 -c "
+import json, sector_map as sm, fundamentals as fm
+d = fm.load(\"reference/fundamentals.csv\")
+m = sm.load()
+json.dump({s: (m.at[s, \"group\"] if s in m.index else \"Unmapped\") for s in d.index},
+          open(\"build/sec.json\", \"w\"))
+"
+node build/preview.js

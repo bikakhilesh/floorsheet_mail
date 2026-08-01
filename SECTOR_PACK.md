@@ -365,6 +365,38 @@ traded in the selection are included, so it values what actually changed hands.
 
 The Scrips tab gains P/E and P/B columns on the same basis.
 
+### The two bubble charts, and why they have no regression line by default
+
+`P/B against P/E` and `ROE against ROA`, bubble area = live market cap, colour =
+sector, click through to the scrip.
+
+Both pairs are related by an identity rather than a correlation:
+
+    ROE = ROA × equity multiplier
+    P/B = P/E × ROE
+
+So a ray from the origin is an exact iso-line — constant leverage on the first
+chart, constant ROE on the second — and where a name sits between two rays *is*
+its leverage, or its ROE. That is strictly more informative than a fitted line,
+which would be describing scatter around an identity and reporting an R² that
+means nothing. A commercial bank at 12x leverage and a hydro at 1.2x are not two
+points on a trend; they are on different rays, and the chart says so directly.
+
+Least squares is still available on the toggle, because the *residual* is a
+legitimate relative-value read — which names are cheap against what their
+returns justify. On log axes the fit is run in log space, so it reports a power
+law (`P/B ∝ P/E^0.62`) rather than a slope, which is the right family for
+multiples. R² is shown so you can see how little it is explaining.
+
+Axes are trimmed to the 2nd–98th percentile because multiples are long-tailed —
+one 400x P/E flattens everything else into a corner. Outliers are **pinned to
+the edge at reduced opacity, not dropped**, and the count is stated under the
+chart. On the shipped snapshot that is 12 of 224 on P/B-P/E and 7 of 213 on
+ROE-ROA.
+
+To see them without a browser: `node tests/_preview.js` after `tests/run.sh`
+writes `build/pe_pb.svg` and `build/roe_roa.svg`.
+
 Coverage gaps are shown, not hidden: names that traded above Rs 10 L with no
 fundamentals are listed by symbol, and the snapshot's as-of date sits next to
 the session you are viewing so staleness is visible.

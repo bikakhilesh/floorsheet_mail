@@ -46,6 +46,19 @@ FUND_CSS = r"""
 td.rich{color:var(--sell)}td.cheap{color:var(--buy)}
 .fundgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:880px){.fundgrid{grid-template-columns:1fr}}
+svg.bub{width:100%;height:420px;display:block;overflow:visible}
+svg.bub .gl{stroke:#EDF1F7;stroke-width:1}
+svg.bub .ax{stroke:#C7CEDB;stroke-width:1}
+svg.bub .iso{stroke:#C7CEDB;stroke-width:1;stroke-dasharray:4 3;fill:none}
+svg.bub .isolab{font-size:9.5px;fill:var(--grey)}
+svg.bub .ols{stroke:var(--navy);stroke-width:1.8;stroke-dasharray:6 3}
+svg.bub text{font-size:10px;fill:var(--grey)}
+svg.bub .atitle{font-size:11px;fill:var(--ink);font-weight:600}
+svg.bub circle{cursor:pointer;stroke:#fff;stroke-width:.8}
+svg.bub circle:hover{stroke:var(--ink);stroke-width:1.6}
+svg.bub .plab{font-size:9px;fill:var(--ink);pointer-events:none}
+.fitline{font-size:11.5px;color:var(--grey);margin:6px 0 0 2px}
+.fitline b{color:var(--navy)}
 """
 
 FUND_PANEL = r"""
@@ -84,6 +97,45 @@ FUND_PANEL = r"""
         in this selection are included, so this is the valuation of what actually
         changed hands, not of the listed universe.</p>
       <div class="scroll" style="max-height:380px"><table id="tFundSec"></table></div>
+    </div>
+
+    <div class="card">
+      <h2>Valuation and returns</h2>
+      <p class="note">Bubble area is live market cap, colour is sector. Both of
+        these pairs are related by an identity, not by a correlation —
+        <code>ROE = ROA × equity multiplier</code> and
+        <code>P/B = P/E × ROE</code> — so the dashed rays are exact iso-lines,
+        not fitted. Where a name sits between two rays <em>is</em> its leverage,
+        or its ROE. A least-squares line through either is available, but it is
+        fitting scatter around an identity; its residual is a relative-value
+        read, not a relationship.</p>
+      <div class="fundbar">
+        <select class="f" id="fdFit">
+          <option value="iso" selected>Overlay: iso-lines (exact)</option>
+          <option value="ols">Overlay: least squares</option>
+          <option value="none">Overlay: none</option>
+        </select>
+        <select class="f" id="fdScale">
+          <option value="log" selected>Log axes</option>
+          <option value="linear">Linear axes</option>
+        </select>
+        <select class="f" id="fdLabel">
+          <option value="20" selected>Label top 20 by size</option>
+          <option value="0">No labels</option>
+          <option value="999">Label everything</option>
+        </select>
+        <span class="hint">Click a bubble to open the scrip.</span>
+      </div>
+      <div class="fundgrid">
+        <div>
+          <div id="fdPEPB"></div>
+          <div class="fitline" id="fdPEPBFit"></div>
+        </div>
+        <div>
+          <div id="fdROE"></div>
+          <div class="fitline" id="fdROEFit"></div>
+        </div>
+      </div>
     </div>
 
     <div class="fundgrid">
@@ -175,6 +227,217 @@ function fundSectorAgg(rows){
     roe:o.wROEw?o.wROE/o.wROEw:null})).sort((a,b)=>b.mcap-a.mcap);
 }
 
+/* ---------- bubble chart ---------- */
+/* Ordinary least squares. Returned in whatever space it was given, so the
+   caller fits in log space when the axes are logarithmic — a straight line on
+   a log-log plot is a power law, which is the right family for multiples. */
+function ols(pts){
+  const n=pts.length;
+  if(n<3)return null;
+  let sx=0,sy=0;
+  pts.forEach(p=>{sx+=p.x;sy+=p.y;});
+  const mx=sx/n,my=sy/n;
+  let sxy=0,sxx=0,syy=0;
+  pts.forEach(p=>{const dx=p.x-mx,dy=p.y-my;sxy+=dx*dy;sxx+=dx*dx;syy+=dy*dy;});
+  if(sxx<=0)return null;
+  const b=sxy/sxx, a=my-b*mx;
+  const r2=(syy>0)?(sxy*sxy)/(sxx*syy):0;
+  return {a:a,b:b,r2:r2,n:n};
+}
+/* Percentile bound. Multiples are long-tailed — one 400x P/E flattens every
+   other point into a corner — so the axes are trimmed and the strays are drawn
+   pinned to the edge rather than dropped, which would hide them entirely. */
+function pctl(vals,q){
+  if(!vals.length)return null;
+  const a=vals.slice().sort((x,y)=>x-y);
+  const i=Math.min(a.length-1,Math.max(0,Math.round(q*(a.length-1))));
+  return a[i];
+}
+
+/* pts: {x,y,r,label,color,tip}. `iso` draws y = k*x rays, which is exact for
+   both pairs on this tab. `fit` overlays OLS instead. */
+function bubbleChart(pts,o){
+  o=o||{};
+  const W=580,H=420,P={l:52,r:16,t:26,b:46};
+  const log=!!o.log;
+  const good=pts.filter(p=>p.x!=null&&p.y!=null&&isFinite(p.x)&&isFinite(p.y)&&
+    (!log||(p.x>0&&p.y>0)));
+  if(good.length<2)return {svg:'<div class="empty">Not enough priced names.</div>',
+                           fit:null,n:0,off:0};
+
+  const xs=good.map(p=>p.x), ys=good.map(p=>p.y);
+  let x0=pctl(xs,0.02), x1=pctl(xs,0.98), y0=pctl(ys,0.02), y1=pctl(ys,0.98);
+  if(log){x0=Math.max(x0,1e-3);y0=Math.max(y0,1e-3);}
+  if(!(x1>x0)){x1=x0*1.5+1;} if(!(y1>y0)){y1=y0*1.5+1;}
+  /* Padding has to match the axis. Subtracting a linear margin from a log
+     domain walks the low end toward zero — a P/E floor of 3 becomes 0.001 —
+     and every tick then prints as 0.00. Pad by a factor instead. */
+  if(log){
+    const fx=Math.pow(x1/x0,0.04), fy=Math.pow(y1/y0,0.04);
+    x0/=fx; x1*=fx; y0/=fy; y1*=fy;
+    x0=Math.max(x0,1e-3); y0=Math.max(y0,1e-3);
+  }else{
+    const px=(x1-x0)*0.06, py=(y1-y0)*0.06;
+    x0-=px; x1+=px; y0-=py; y1+=py;
+  }
+
+  const tx=v=>log?Math.log(Math.max(v,1e-6)):v;
+  const X0=tx(x0),X1=tx(x1),Y0=tx(y0),Y1=tx(y1);
+  const sx=v=>P.l+(W-P.l-P.r)*((tx(v)-X0)/(X1-X0||1));
+  const sy=v=>H-P.b-(H-P.t-P.b)*((tx(v)-Y0)/(Y1-Y0||1));
+  const clampX=v=>Math.min(Math.max(v,x0),x1);
+  const clampY=v=>Math.min(Math.max(v,y0),y1);
+
+  const rmax=Math.max(...good.map(p=>p.r||0),1);
+  const rad=v=>3+16*Math.sqrt(Math.max(v,0)/rmax);   // area, not radius
+
+  const ticks=(lo,hi)=>{
+    if(log){
+      const out=[];
+      for(let e=Math.floor(Math.log10(lo));e<=Math.ceil(Math.log10(hi));e++)
+        for(const m of [1,2,5]){const v=m*Math.pow(10,e);
+          if(v>=lo&&v<=hi)out.push(v);}
+      return out.length>1?out:[lo,hi];
+    }
+    const out=[];for(let i=0;i<=5;i++)out.push(lo+(hi-lo)*i/5);return out;
+  };
+  const fmt=v=>Math.abs(v)>=100?v.toFixed(0):(Math.abs(v)>=10?v.toFixed(1):v.toFixed(2));
+
+  let g='';
+  ticks(x0,x1).forEach(v=>{g+='<line class="gl" x1="'+sx(v).toFixed(1)+'" y1="'+P.t+
+    '" x2="'+sx(v).toFixed(1)+'" y2="'+(H-P.b)+'"/><text x="'+sx(v).toFixed(1)+
+    '" y="'+(H-P.b+14)+'" text-anchor="middle">'+fmt(v)+'</text>';});
+  ticks(y0,y1).forEach(v=>{g+='<line class="gl" x1="'+P.l+'" y1="'+sy(v).toFixed(1)+
+    '" x2="'+(W-P.r)+'" y2="'+sy(v).toFixed(1)+'"/><text x="'+(P.l-6)+'" y="'+
+    (sy(v)+3).toFixed(1)+'" text-anchor="end">'+fmt(v)+'</text>';});
+
+  /* Exact rays y = k*x. Labelled where they leave the plot, so the label sits
+     next to the line it belongs to rather than in a legend. */
+  let iso='';
+  if(o.iso&&o.iso.length){
+    o.iso.forEach(k=>{
+      const seg=[];
+      for(let i=0;i<=40;i++){
+        const xv=log?Math.exp(X0+(X1-X0)*i/40):x0+(x1-x0)*i/40;
+        const yv=k*xv;
+        if(yv>=y0&&yv<=y1)seg.push([sx(xv),sy(yv)]);
+      }
+      if(seg.length<2)return;
+      iso+='<path class="iso" d="M'+seg.map(p=>p[0].toFixed(1)+' '+
+        p[1].toFixed(1)).join(' L')+'"/>';
+      const e=seg[seg.length-1];
+      iso+='<text class="isolab" x="'+(e[0]-3).toFixed(1)+'" y="'+
+        (e[1]-4).toFixed(1)+'" text-anchor="end">'+
+        (o.isoLabel?o.isoLabel(k):k)+'</text>';
+    });
+  }
+
+  let fit=null,fitPath='';
+  if(o.fit==='ols'){
+    fit=ols(good.map(p=>({x:log?Math.log(p.x):p.x,y:log?Math.log(p.y):p.y})));
+    if(fit){
+      const at=xv=>{const t=fit.a+fit.b*(log?Math.log(xv):xv);
+        return log?Math.exp(t):t;};
+      const seg=[];
+      for(let i=0;i<=40;i++){
+        const xv=log?Math.exp(X0+(X1-X0)*i/40):x0+(x1-x0)*i/40;
+        const yv=at(xv);
+        if(yv>=y0&&yv<=y1)seg.push([sx(xv),sy(yv)]);
+      }
+      if(seg.length>1)fitPath='<path class="ols" d="M'+seg.map(p=>
+        p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' L')+'"/>';
+      fit.at=at;
+    }
+  }
+
+  let off=0;
+  const byR=good.slice().sort((a,b)=>(b.r||0)-(a.r||0));
+  const labelN=o.labelN||0;
+  const labelled=new Set(byR.slice(0,labelN).map(p=>p.label));
+  let dots='',labs='';
+  byR.slice().reverse().forEach(p=>{
+    const outside=p.x<x0||p.x>x1||p.y<y0||p.y>y1;
+    if(outside)off++;
+    const cx=sx(clampX(p.x)),cy=sy(clampY(p.y));
+    dots+='<circle cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="'+
+      rad(p.r||0).toFixed(1)+'" fill="'+(p.color||'var(--navy)')+'" opacity="'+
+      (outside?0.35:0.72)+'" data-s="'+p.label+'" data-t="'+
+      (p.tip||'').replace(/"/g,'&quot;')+'"/>';
+    if(labelled.has(p.label))
+      labs+='<text class="plab" x="'+(cx+rad(p.r||0)+2).toFixed(1)+'" y="'+
+        (cy+3).toFixed(1)+'">'+p.label+'</text>';
+  });
+
+  const svg='<svg class="bub" viewBox="0 0 '+W+' '+H+'">'+
+    '<text class="atitle" x="'+P.l+'" y="14">'+(o.title||'')+'</text>'+
+    g+iso+fitPath+dots+labs+
+    '<line class="ax" x1="'+P.l+'" y1="'+(H-P.b)+'" x2="'+(W-P.r)+'" y2="'+
+      (H-P.b)+'"/>'+
+    '<line class="ax" x1="'+P.l+'" y1="'+P.t+'" x2="'+P.l+'" y2="'+(H-P.b)+'"/>'+
+    '<text x="'+((P.l+W-P.r)/2)+'" y="'+(H-8)+'" text-anchor="middle">'+
+      (o.xlab||'')+'</text>'+
+    '<text x="14" y="'+((P.t+H-P.b)/2)+'" text-anchor="middle" transform="rotate(-90 14 '+
+      ((P.t+H-P.b)/2)+')">'+(o.ylab||'')+'</text></svg>';
+  return {svg:svg,fit:fit,n:good.length,off:off};
+}
+
+function bindBubbles(el){
+  el.querySelectorAll('circle[data-s]').forEach(c=>{
+    c.onmousemove=e=>showTip(e,c.dataset.t);
+    c.onmouseleave=hideTip;
+    c.onclick=()=>{hideTip();openScrip(c.dataset.s);};});
+}
+function secColorSafe(g){
+  return (typeof secColor==='function')?secColor(g):'var(--navy)';
+}
+
+function renderFundCharts(rows){
+  const log=$('#fdScale').value==='log';
+  const fitMode=$('#fdFit').value;
+  const labelN=+$('#fdLabel').value;
+  const iso=fitMode==='iso';
+
+  const mk=(sel,fsel,pts,o)=>{
+    const r=bubbleChart(pts,Object.assign({log:log,labelN:labelN,
+      fit:fitMode==='ols'?'ols':null},o));
+    $(sel).innerHTML=r.svg; bindBubbles($(sel));
+    let note=r.n+' names';
+    if(r.off)note+=' · '+r.off+' pinned to the edge, outside the 2–98% range';
+    if(r.fit)note+=' · <b>'+o.fitLabel(r.fit)+'</b>  R²='+r.fit.r2.toFixed(2);
+    $(fsel).innerHTML=note;
+  };
+
+  /* P/B = P/E x ROE, so a ray is a line of constant ROE. */
+  mk('#fdPEPB','#fdPEPBFit',
+     rows.filter(r=>r.peLive>0&&r.pbvLive>0).map(r=>({
+       x:r.peLive,y:r.pbvLive,r:r.mcapLive||0,label:r.sym,
+       color:secColorSafe(r.sector),
+       tip:'<b>'+r.sym+'</b> · '+r.sector+'<br>P/E '+r.peLive.toFixed(1)+
+         ' · P/B '+r.pbvLive.toFixed(2)+'<br>implied ROE '+
+         (100*r.pbvLive/r.peLive).toFixed(1)+'%<br>'+npr(r.mcapLive)})),
+     {title:'P/B against P/E — rays are constant ROE',
+      xlab:'P/E (live)',ylab:'P/B (live)',
+      iso:iso?[0.05,0.10,0.15,0.20,0.30,0.45]:null,
+      isoLabel:k=>(100*k).toFixed(0)+'% ROE',
+      fitLabel:f=>log?('P/B ∝ P/E^'+f.b.toFixed(2)):
+                     ('P/B = '+f.b.toFixed(3)+'·P/E + '+f.a.toFixed(2))});
+
+  /* ROE = ROA x equity multiplier, so a ray is constant leverage. */
+  mk('#fdROE','#fdROEFit',
+     rows.filter(r=>r.roeTTM>0&&r.roaTTM>0).map(r=>({
+       x:r.roaTTM,y:r.roeTTM,r:r.mcapLive||0,label:r.sym,
+       color:secColorSafe(r.sector),
+       tip:'<b>'+r.sym+'</b> · '+r.sector+'<br>ROA '+r.roaTTM.toFixed(2)+
+         '% · ROE '+r.roeTTM.toFixed(1)+'%<br>implied leverage '+
+         (r.roeTTM/r.roaTTM).toFixed(1)+'x<br>'+npr(r.mcapLive)})),
+     {title:'ROE against ROA — rays are constant leverage',
+      xlab:'ROA TTM %',ylab:'ROE TTM %',
+      iso:iso?[1,2,4,8,12,16]:null,
+      isoLabel:k=>k+'x',
+      fitLabel:f=>log?('ROE ∝ ROA^'+f.b.toFixed(2)):
+                     ('ROE = '+f.b.toFixed(2)+'·ROA + '+f.a.toFixed(2))});
+}
+
 /* ---------- render ---------- */
 function renderFund(){
   if(!FUND){
@@ -244,6 +507,8 @@ function renderFund(){
   barList($('#fdDrift'),drift.map(r=>({k:r.sym,v:r.drift,
     t:(r.drift>=0?'+':'')+r.drift.toFixed(1)+'%',
     click:"openScrip('"+r.sym+"')"})),{diverging:1});
+
+  renderFundCharts(rows);
 }
 
 /* ---------- fundamentals wiring ---------- */
@@ -252,4 +517,8 @@ function renderFund(){
   FDOPT.minT=+$('#fdMinT').value;
   renderFund();}));
 $('#fdQ').addEventListener('input',renderFund);
+/* The charts read the same rows the tables do, so redraw only those. */
+['fdFit','fdScale','fdLabel'].forEach(id=>
+  $('#'+id).addEventListener('change',()=>{
+    if(FUND)renderFundCharts(fundRows());}));
 """
