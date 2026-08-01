@@ -33,8 +33,6 @@ import pandas as pd
 
 import floorsheet_viz as fv
 import interactive_report as ir
-import fundamentals as fm
-import fundamentals_view as fv
 import sector_map as sm
 import sector_view as sv
 
@@ -292,7 +290,6 @@ svg.chart text{font-size:10px;fill:var(--grey)}
 footer{color:var(--grey);font-size:11.5px;border-top:1px solid var(--line);
  margin-top:24px;padding-top:12px}
 __SECTOR_CSS__
-__FUND_CSS__
 </style></head><body>
 
 <header><div class="wrap">
@@ -331,7 +328,6 @@ __FUND_CSS__
     <button data-t="brokers">Brokers</button>
     <button data-t="scrips">Scrips</button>
     <button data-t="sectors">Sectors</button>
-    <button data-t="fund">Fundamentals</button>
     <button data-t="blocks">Block trades</button>
     <button data-t="flow">Flow matrix</button>
     <button data-t="trends">Trends</button>
@@ -368,7 +364,6 @@ __FUND_CSS__
     <div class="scroll"><table id="tScrip"></table></div></div></div>
 
 __SECTOR_PANEL__
-__FUND_PANEL__
 
   <div class="panel" id="p-blocks"><div class="card">
     <h2>Largest single transactions</h2><p class="note">Cross = same broker both legs.</p>
@@ -467,7 +462,6 @@ async function boot(){
     IDX=await (await fetch('data/index.json')).json();
   }
   await secLoad();
-  await fundLoad();
   const sel=$('#daySel');
   sel.innerHTML=IDX.dates.slice().reverse().map(d=>`<option value="${d}">${d}</option>`).join('');
   $('#dayDate').min=IDX.dates[0]; $('#dayDate').max=IDX.dates[IDX.dates.length-1];
@@ -671,10 +665,7 @@ let drawBrokers,drawScrips,drawBlocks;
 
 function renderAll(){
   BROKERS=rowsOf(DAY,'brokers'); SCRIPS=rowsOf(DAY,'scrips');
-  SCRIPS.forEach(s=>{s.sector=secGroupAll(s.sym);
-    const _f=(typeof fundRow==='function')?fundRow(s):null;
-    s.pe=_f?_f.peLive:null; s.pb=_f?_f.pbvLive:null;});
-  secFillScripFilter();
+  SCRIPS.forEach(s=>{s.sector=secGroupAll(s.sym);}); secFillScripFilter();
   BSCRIP=rowsOf(DAY,'bscrip'); PAIRS=rowsOf(DAY,'pairs'); BLOCKS=rowsOf(DAY,'blocks');
   BR_BY={};BROKERS.forEach(b=>BR_BY[b.code]=b);
   SC_BY={};SCRIPS.forEach(s=>SC_BY[s.sym]=s);
@@ -712,8 +703,6 @@ function renderAll(){
   drawScrips=makeTable('tScrip',[
     {k:'sym',h:'Scrip',f:r=>r.sym},
     {k:'sector',h:'Sector',f:r=>r.sector||'—'},
-    {k:'pe',h:'P/E',num:1,f:r=>r.pe==null?'—':r.pe.toFixed(1)},
-    {k:'pb',h:'P/B',num:1,f:r=>r.pb==null?'—':r.pb.toFixed(2)},
     {k:'turnover',h:'Turnover',num:1,sort:1,f:r=>npr(r.turnover,'')},
     {k:'volume',h:'Volume',num:1,f:r=>num(r.volume)},
     {k:'trades',h:'Trades',num:1,f:r=>num(r.trades)},
@@ -741,7 +730,6 @@ function renderAll(){
   refreshTables(); drawFlow();
   if($('#p-trends').classList.contains('on'))renderTrends();
   if($('#p-sectors').classList.contains('on'))renderSectors();
-  if($('#p-fund').classList.contains('on'))renderFund();
 }
 function refreshTables(){
   $('#cBroker').textContent=drawBrokers()+' brokers';
@@ -905,7 +893,6 @@ function drawScripTrend(){
     {unit:m==='vwap'?'':'L',mark:PANEL.dates.indexOf(DATE)});}
 
 __SECTOR_JS__
-__FUND_JS__
 
 /* ---------- wiring ---------- */
 /* ---------- timeline slicer ---------- */
@@ -1043,8 +1030,7 @@ $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));
   document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on',p.id==='p-'+b.dataset.t));
   if(b.dataset.t==='trends')renderTrends();
-  if(b.dataset.t==='sectors')renderSectors();
-  if(b.dataset.t==='fund')renderFund();});
+  if(b.dataset.t==='sectors')renderSectors();});
 window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);
   if(h&&h!==DATE&&IDX.dates.includes(h))show(h);});
 boot();
@@ -1072,38 +1058,6 @@ def write_sectors(out: str, listed: str = sm.DEFAULT_PATH) -> str | None:
     return p
 
 
-def write_fundamentals(out: str, path: str,
-                       listed: str | None = None) -> str | None:
-    """data/fundamentals.json — the npstocks snapshot, keyed to symbols.
-
-    Missing is a warning, not a failure: the site is useful without it and the
-    tab says so itself. A join that resolves nothing, though, is a broken alias
-    file rather than an empty one, so that gets said out loud.
-    """
-    try:
-        d = fm.load(path, listed)
-    except FileNotFoundError as e:
-        print(f"WARNING: {e}\n         The Fundamentals tab will be empty.")
-        return None
-    p = fm.write_payload(d, out, fm.asof_from_name(path))
-    un = d.attrs.get("unmatched", [])
-    print(f"Fundamentals: {p} ({os.path.getsize(p) / 1024:,.0f} KB, "
-          f"{len(d)} symbols"
-          + (f", {len(un)} unmatched" if un else "") + ")")
-    if un:
-        print("  unmatched: " + ", ".join(un[:8])
-              + (" …" if len(un) > 8 else ""))
-    return p
-
-
-def _read_json(site_dir: str, name: str):
-    p = os.path.join(site_dir, "data", name)
-    if not os.path.exists(p):
-        return None
-    with open(p, encoding="utf-8") as fh:
-        return json.load(fh)
-
-
 def _read_sectors(site_dir: str):
     p = os.path.join(site_dir, "data", "sectors.json")
     if not os.path.exists(p):
@@ -1117,9 +1071,6 @@ def _render(embed: str) -> str:
     return (APP.replace("__SECTOR_CSS__", sv.SECTOR_CSS)
                .replace("__SECTOR_PANEL__", sv.SECTOR_PANEL)
                .replace("__SECTOR_JS__", sv.SECTOR_JS)
-               .replace("__FUND_CSS__", fv.FUND_CSS)
-               .replace("__FUND_PANEL__", fv.FUND_PANEL)
-               .replace("__FUND_JS__", fv.FUND_JS)
                .replace("__EMBED__", embed))
 
 
@@ -1159,7 +1110,6 @@ def build_offline(site_dir: str, out_html: str, days: int = 22) -> str:
         },
         "days": {},
         "sectors": _read_sectors(site_dir),
-        "fundamentals": _read_json(site_dir, "fundamentals.json"),
     }
     mask = [i for i, d in enumerate(panel["dates"]) if d in keep]
     for grp in ("brokers", "scrips"):
@@ -1191,13 +1141,10 @@ def main(argv=None) -> int:
                     help="sessions to embed in the offline copy (0 = all)")
     ap.add_argument("--listed", default=sm.DEFAULT_PATH,
                     help="listed-securities csv behind the sector map")
-    ap.add_argument("--fundamentals", default=fm.DEFAULT_PATH,
-                    help="npstocks snapshot behind the Fundamentals tab")
     args = ap.parse_args(argv)
 
     info = build_site_data(args.archive, args.out, args.rebuild)
     write_sectors(args.out, args.listed)
-    write_fundamentals(args.out, args.fundamentals, args.listed)
     build_app(args.out)
     if args.offline:
         p = build_offline(args.out, args.offline, args.offline_days)

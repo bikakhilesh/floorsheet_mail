@@ -1,4 +1,4 @@
-# Sector map + Sectors tab
+# Sector map + fundamentals, and the two tabs they feed
 
 Adds a symbol → sector map to `floorsheet_mail`, keeps it current from NEPSE's
 listing table on its own schedule, and joins it to the floor sheet in the
@@ -20,8 +20,15 @@ from the repo on checkout.
 | `apply_sector_patch.py` | new — wires `sector_view` into `dashboard_site.py` (19 edits) |
 | `reference/listed_securities.csv` | new — the map, 641 securities, canonicalised from your `Listed.csv` |
 | `.github/workflows/nepse-listed.yml` | new — daily, no mail, commits only on change |
-| `tests/` | new — node harness for the tab's arithmetic |
-| `dashboard_site.py` | patched |
+| `fundamentals.py` | new — parses the npstocks dump, joins it to symbols, derives share counts |
+| `fundamentals_scrape.py` | new — npstocks login and comparative-table extract |
+| `fundamentals_view.py` | new — css, markup and js for the Fundamentals tab |
+| `apply_fundamentals_patch.py` | new — wires it in (15 edits, run after the sector patch) |
+| `reference/fundamentals.csv` | new — the snapshot, 282 companies |
+| `reference/fundamentals_alias.csv` | new — 26 company names npstocks spells differently |
+| `.github/workflows/nepse-fundamentals.yml` | new — 15:30 NPT, no mail, needs two secrets |
+| `tests/` | new — four suites, 121 assertions |
+| `dashboard_site.py` | patched twice |
 | `requirements.txt` | unchanged — no new dependencies |
 
 ---
@@ -277,6 +284,108 @@ control ended a walk at page eleven and committed a 216-row register. The row
 floor could not catch it — 216 is a perfectly plausible number. Only counting
 pages against the pager catches that class of failure, which is why the test
 asserts on pages covered rather than rows returned.
+
+---
+
+---
+
+## Fundamentals
+
+Absorbed out of `analysis-daily` so that repo can go away. The npstocks
+comparative table is scraped directly here, keyed to NEPSE symbols, and priced
+onto whichever session you have selected.
+
+### Two secrets
+
+Settings → Secrets and variables → Actions → New repository secret:
+
+| Secret | Value |
+|---|---|
+| `NPSTOCKS_EMAIL` | your npstocks login |
+| `NPSTOCKS_PASSWORD` | your npstocks password |
+
+They reach the script through the environment only — never as arguments, so
+they never land in a process listing, and nothing echoes them. This workflow
+does not mail, so it needs no Gmail secrets.
+
+### The join, which is the whole problem
+
+The dump is keyed on company name; the floor sheet is keyed on symbol. Fuzzy
+matching is not an option here — at a 0.80 cutoff it places **Sana Kisan onto
+Gandaki, Swabalamban onto Salapa, National Microfinance onto NMB Microfinance**.
+Six of fifteen candidates were a different institution. Nepali BFI names share
+too much vocabulary for string distance to carry information.
+
+So: exact normalised name, or a line in `reference/fundamentals_alias.csv`, or
+reported unmatched. There is no third path, and `tests/test_fundamentals.py`
+asserts that no similarity function exists anywhere in the module. The shipped
+alias file has **26 entries and gets all 282 companies to a symbol**.
+
+When npstocks renames something, it surfaces as unmatched in the scrape run's
+summary — one line to add, and it fails visibly rather than silently dropping a
+company.
+
+### Live multiples scale the vendor's ratio
+
+    peLive   = peD * (price / vendorClose)
+    pbvLive  = pbv * (price / vendorClose)
+    mcapLive = shares * price
+
+Not recomputed from EPS and Bookvalue, and the reason matters. `PE (D)`
+reproduces `Latest Close / EPS (D)` to about 5e-4 across the file — but `PBV`
+misses `Latest Close / Bookvalue` by more than 1% on **27 names, nearly all
+insurers**: IGI 1.24 against 2.39 computed, NLG 2.11 against 3.42, Nepal Life
+6.94 against 5.95. Errors run both directions and the P/E on those same rows is
+fine, so the close is not stale — npstocks is using a different book basis for
+insurance than the Bookvalue column it shows, which is what you would expect if
+it follows the NIA net-worth definition.
+
+Recomputing would therefore hand you a quietly wrong P/B for the entire
+insurance sector. Scaling preserves whatever basis the vendor used and moves
+only the price; where the vendor field does reconcile the two are algebraically
+identical. The test suite prices every scrip at the vendor's own close and
+asserts the multiples come back exactly as stated.
+
+`shares` comes from `Market Cap / Latest Close`, not paidup capital — paidup
+over the Rs 100 par disagrees on **91 of 282 names** (0.952 shows up repeatedly,
+a 5% bonus not yet in paidup).
+
+### The tab
+
+Sits after Sectors. Valuation table for every traded name with fundamentals —
+price, drift against the vendor close, live market cap, live P/E and P/B, EPS,
+BVPS, ROE, net margin, RSI. Price basis switches between session VWAP, last
+contract, and vendor close (which re-prices nothing, for reconciliation).
+
+Below it, **market-cap-weighted sector P/E, P/B and ROE with the median
+alongside** — the weighted number says what the sector costs, the median says
+whether one name is carrying it. Loss-makers are dropped from the ratios rather
+than clamped: a loss-making name has no P/E, not a large one. Only names that
+traded in the selection are included, so it values what actually changed hands.
+
+The Scrips tab gains P/E and P/B columns on the same basis.
+
+Coverage gaps are shown, not hidden: names that traded above Rs 10 L with no
+fundamentals are listed by symbol, and the snapshot's as-of date sits next to
+the session you are viewing so staleness is visible.
+
+### Before you delete analysis-daily
+
+Two things in it were wrong and are worth knowing, since the same mistakes are
+easy to reintroduce:
+
+- **Its cron was `0 10 * * 0,1,2,3,4`** — Sunday to Thursday. NEPSE moved to
+  Monday–Friday in April 2026, so it fired on Sundays when nothing traded and
+  **never produced Friday's fundamentals at all**. The workflow here runs
+  `45 9 * * 1,2,3,4,5`.
+- **It scraped NEPSE's listed register with absolute XPaths**, which is what
+  produced its `[PARTIAL]` fallbacks. That job is now `nepse-listed`, which
+  reads the sector page and the promoter register with gates and a page-count
+  check.
+
+Also: the repo is public at the moment and its own README says not to be. Before
+or after deleting it, check `nepse-github.zip` in its root — if that snapshot
+predates moving credentials into Actions secrets, it is currently world-readable.
 
 ---
 
