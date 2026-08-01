@@ -174,6 +174,32 @@ def build_app(out: str) -> str:'''),
 
 
 # ────────────────────────────────────────────────────────────────────────────
+def import_collisions(text: str) -> list[str]:
+    """Two imports bound to the same alias, where the later one wins silently.
+
+    Anchors resolving is not the same as the result being correct. Adding an
+    import that shadows an existing alias passes every anchor check and then
+    fails at runtime somewhere unrelated.
+    """
+    import ast
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as e:
+        return [f"  patched file does not parse: {e}"]
+    seen: dict[str, str] = {}
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                alias = a.asname or a.name.split(".")[0]
+                if alias in seen and seen[alias] != a.name:
+                    out.append(f"  alias {alias!r} is bound to both "
+                               f"{seen[alias]!r} and {a.name!r} — the second "
+                               f"shadows the first")
+                seen[alias] = a.name
+    return out
+
+
 def apply(text: str) -> tuple[str, list[str]]:
     """Every anchor is validated before anything is written."""
     problems = []
@@ -187,6 +213,9 @@ def apply(text: str) -> tuple[str, list[str]]:
         return text, problems
     for _, old, new in EDITS:
         text = text.replace(old, new, 1)
+    clash = import_collisions(text)
+    if clash:
+        return text, clash
     return text, []
 
 
