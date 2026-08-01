@@ -34,7 +34,7 @@ import pandas as pd
 import floorsheet_viz as fv
 import interactive_report as ir
 import fundamentals as fm
-import fundamentals_view as fv
+import fundamentals_view as fmv
 import sector_map as sm
 import sector_view as sv
 
@@ -1117,9 +1117,9 @@ def _render(embed: str) -> str:
     return (APP.replace("__SECTOR_CSS__", sv.SECTOR_CSS)
                .replace("__SECTOR_PANEL__", sv.SECTOR_PANEL)
                .replace("__SECTOR_JS__", sv.SECTOR_JS)
-               .replace("__FUND_CSS__", fv.FUND_CSS)
-               .replace("__FUND_PANEL__", fv.FUND_PANEL)
-               .replace("__FUND_JS__", fv.FUND_JS)
+               .replace("__FUND_CSS__", fmv.FUND_CSS)
+               .replace("__FUND_PANEL__", fmv.FUND_PANEL)
+               .replace("__FUND_JS__", fmv.FUND_JS)
                .replace("__EMBED__", embed))
 
 
