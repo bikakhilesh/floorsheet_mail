@@ -1,0 +1,190 @@
+name: nepse-listed
+
+# The sector map. Scrapes NEPSE's listed-securities table, and commits
+# reference/listed_securities.csv only when a security actually changed — a new
+# listing, a delisting, a reclassification, a suspension. On a quiet day it
+# writes nothing and stops.
+#
+# It sends no mail. This is reference data, not a market event; the changelog
+# and the run summary are the record.
+#
+# It runs at 08:00 NPT, hours before the 16:00 NPT scrape chain, so a symbol
+# that starts trading today is already mapped when the day's floor sheet lands.
+# NEPSE lists a security in this table ahead of its first trading day, so the
+# map normally leads the floor sheet rather than following it.
+#
+# Nothing else in the pipeline depends on this workflow. If it fails, the
+# dashboard keeps building against the last committed map.
+
+on:
+  schedule:
+    # 02:15 UTC = 08:00 NPT, daily
+    - cron: '15 2 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Write the csv even if the sanity gates reject the scrape"
+        type: boolean
+        default: false
+      skip_publish:
+        description: "Update the map but do not rebuild the dashboard"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write        # commit the reference csv, force-push gh-pages
+
+concurrency:
+  group: nepse-listed
+  cancel-in-progress: false
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  listed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      changed:  ${{ steps.scrape.outputs.changed }}
+      material: ${{ steps.scrape.outputs.material }}
+      added:    ${{ steps.scrape.outputs.added }}
+      removed:  ${{ steps.scrape.outputs.removed }}
+      total:    ${{ steps.scrape.outputs.total }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Exits 2 and writes nothing if the scrape comes back implausibly small,
+      # which is the failure mode that would otherwise blank the sector map for
+      # every dashboard that reads it.
+      - name: Scrape the listing table
+        id: scrape
+        run: |
+          python get_listed_securities.py \
+            ${{ github.event.inputs.force == 'true' && '--force' || '' }}
+
+      - name: Commit the map
+        if: steps.scrape.outputs.changed == 'true'
+        env:
+          MSG: >-
+            reference: listed securities —
+            ${{ steps.scrape.outputs.added }} added,
+            ${{ steps.scrape.outputs.removed }} removed,
+            ${{ steps.scrape.outputs.reclassified }} reclassified
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A reference/
+          if git diff --cached --quiet; then
+            echo "Nothing staged after all."
+            exit 0
+          fi
+          git commit -q -m "$MSG"
+          # Rebase rather than force: main is the working branch and a push from
+          # a laptop must never be overwritten by a scheduled job.
+          git pull --rebase --quiet origin main
+          git push -q origin HEAD:main
+          echo "Committed $(git rev-parse --short HEAD)."
+
+      - name: Nothing changed
+        if: steps.scrape.outputs.changed != 'true'
+        run: echo "Listing table unchanged — no commit, no rebuild."
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Only when a security changed. A new email address on an existing listing
+  # gets committed above but does not move a single number on the dashboard.
+  publish:
+    needs: listed
+    if: >
+      needs.listed.outputs.material == 'true' &&
+      github.event.inputs.skip_publish != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Shared with nepse-dashboard so the two can never force-push gh-pages at
+    # the same moment. They queue instead.
+    concurrency:
+      group: floorsheet-dashboard
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main          # pick up the commit the previous job just pushed
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Fetch the archive
+        id: arch
+        run: |
+          set -euo pipefail
+          URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          if ! git clone --quiet --depth 1 --branch data "$URL" archive; then
+            echo "::notice::No data branch yet — nothing to re-map."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          COUNT=$(ls -1 archive/parquet/*.parquet 2>/dev/null | wc -l)
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::notice::Archive is empty — nothing to re-map."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "Archive holds $COUNT session(s)."
+
+      # The per-day json is reused from the live site and the sector join happens
+      # in the browser, so this only rewrites data/sectors.json and index.html.
+      # The whole archive re-maps without a single parquet being reopened.
+      - name: Rebuild the site
+        if: steps.arch.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p site/data
+          if git clone --depth 1 --branch gh-pages \
+               "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+               site_old 2>/dev/null; then
+            cp -r site_old/data/. site/data/ 2>/dev/null || true
+          else
+            echo "No gh-pages branch yet — building the whole site once."
+          fi
+          python dashboard_site.py --archive archive/parquet --out site \
+            --listed reference/listed_securities.csv
+          touch site/.nojekyll
+
+      - name: Publish to GitHub Pages
+        if: steps.arch.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          cd site
+          git init -q
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q --orphan main
+          git add -A
+          git commit -q -m "Sector map refresh — ${{ needs.listed.outputs.total }} securities"
+          git push -q --force \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+            main:gh-pages

@@ -33,6 +33,8 @@ import pandas as pd
 
 import floorsheet_viz as fv
 import interactive_report as ir
+import sector_map as sm
+import sector_view as sv
 
 L = 1e5  # lakh — panel series are stored in lakh to keep the file small
 
@@ -287,6 +289,7 @@ svg.chart .gl{stroke:#EDF1F7;stroke-width:1}
 svg.chart text{font-size:10px;fill:var(--grey)}
 footer{color:var(--grey);font-size:11.5px;border-top:1px solid var(--line);
  margin-top:24px;padding-top:12px}
+__SECTOR_CSS__
 </style></head><body>
 
 <header><div class="wrap">
@@ -324,6 +327,7 @@ footer{color:var(--grey);font-size:11.5px;border-top:1px solid var(--line);
     <button data-t="overview" class="on">Overview</button>
     <button data-t="brokers">Brokers</button>
     <button data-t="scrips">Scrips</button>
+    <button data-t="sectors">Sectors</button>
     <button data-t="blocks">Block trades</button>
     <button data-t="flow">Flow matrix</button>
     <button data-t="trends">Trends</button>
@@ -355,8 +359,11 @@ footer{color:var(--grey);font-size:11.5px;border-top:1px solid var(--line);
   <div class="panel" id="p-scrips"><div class="card">
     <h2>Scrip activity</h2><p class="note">Click a row for the broker split.</p>
     <div class="toolbar"><input type="search" id="qScrip" placeholder="Filter symbol…">
+      <select class="f" id="fScripSector"><option value="">All sectors</option></select>
       <span class="hint" id="cScrip"></span></div>
     <div class="scroll"><table id="tScrip"></table></div></div></div>
+
+__SECTOR_PANEL__
 
   <div class="panel" id="p-blocks"><div class="card">
     <h2>Largest single transactions</h2><p class="note">Cross = same broker both legs.</p>
@@ -454,6 +461,7 @@ async function boot(){
   } else {
     IDX=await (await fetch('data/index.json')).json();
   }
+  await secLoad();
   const sel=$('#daySel');
   sel.innerHTML=IDX.dates.slice().reverse().map(d=>`<option value="${d}">${d}</option>`).join('');
   $('#dayDate').min=IDX.dates[0]; $('#dayDate').max=IDX.dates[IDX.dates.length-1];
@@ -657,6 +665,7 @@ let drawBrokers,drawScrips,drawBlocks;
 
 function renderAll(){
   BROKERS=rowsOf(DAY,'brokers'); SCRIPS=rowsOf(DAY,'scrips');
+  SCRIPS.forEach(s=>{s.sector=secGroupAll(s.sym);}); secFillScripFilter();
   BSCRIP=rowsOf(DAY,'bscrip'); PAIRS=rowsOf(DAY,'pairs'); BLOCKS=rowsOf(DAY,'blocks');
   BR_BY={};BROKERS.forEach(b=>BR_BY[b.code]=b);
   SC_BY={};SCRIPS.forEach(s=>SC_BY[s.sym]=s);
@@ -693,6 +702,7 @@ function renderAll(){
         (!s||(s==='buy'?b.net>0:b.net<0)));},c=>openBroker(+c));
   drawScrips=makeTable('tScrip',[
     {k:'sym',h:'Scrip',f:r=>r.sym},
+    {k:'sector',h:'Sector',f:r=>r.sector||'—'},
     {k:'turnover',h:'Turnover',num:1,sort:1,f:r=>npr(r.turnover,'')},
     {k:'volume',h:'Volume',num:1,f:r=>num(r.volume)},
     {k:'trades',h:'Trades',num:1,f:r=>num(r.trades)},
@@ -701,8 +711,9 @@ function renderAll(){
     {k:'high',h:'High',num:1,f:r=>r.high.toFixed(1)},
     {k:'rangePct',h:'Range %',num:1,f:r=>r.rangePct.toFixed(1)},
     {k:'hhi',h:'Buy HHI',num:1,f:r=>num(r.hhi)}],
-    ()=>{const q=$('#qScrip').value.trim().toUpperCase();
-      return SCRIPS.filter(s=>!q||s.sym.includes(q));},s=>openScrip(s));
+    ()=>{const q=$('#qScrip').value.trim().toUpperCase(),g=$('#fScripSector').value;
+      return SCRIPS.filter(s=>(!q||s.sym.includes(q))&&(!g||s.sector===g));},
+    s=>openScrip(s));
   const blockCols=[
     {k:'sym',h:'Scrip',f:r=>r.sym},{k:'buyer',h:'Buyer',f:r=>bname(r.buyer)},
     {k:'seller',h:'Seller',f:r=>bname(r.seller)},
@@ -718,6 +729,7 @@ function renderAll(){
         String(b.seller)===q)&&(t===''||String(b.cross)===t));});
   refreshTables(); drawFlow();
   if($('#p-trends').classList.contains('on'))renderTrends();
+  if($('#p-sectors').classList.contains('on'))renderSectors();
 }
 function refreshTables(){
   $('#cBroker').textContent=drawBrokers()+' brokers';
@@ -880,6 +892,8 @@ function drawScripTrend(){
   $('#trScripChart').innerHTML=lineChart(PANEL.dates,m==='vwap'?s[1]:s[0],
     {unit:m==='vwap'?'':'L',mark:PANEL.dates.indexOf(DATE)});}
 
+__SECTOR_JS__
+
 /* ---------- wiring ---------- */
 /* ---------- timeline slicer ---------- */
 const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1007,7 +1021,7 @@ document.addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
   if(e.key==='ArrowLeft'&&!$('#prev').disabled)$('#prev').click();
   if(e.key==='ArrowRight'&&!$('#next').disabled)$('#next').click();});
-['qBroker','fBrokerSide','qScrip','qBlock','fBlockType'].forEach(id=>
+['qBroker','fBrokerSide','qScrip','fScripSector','qBlock','fBlockType'].forEach(id=>
   $('#'+id).addEventListener('input',refreshTables));
 $('#fFlowN').addEventListener('change',drawFlow);
 ['trBroker','trBrokerMode'].forEach(id=>$('#'+id).addEventListener('change',drawBrokerTrend));
@@ -1015,7 +1029,8 @@ $('#fFlowN').addEventListener('change',drawFlow);
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));
   document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on',p.id==='p-'+b.dataset.t));
-  if(b.dataset.t==='trends')renderTrends();});
+  if(b.dataset.t==='trends')renderTrends();
+  if(b.dataset.t==='sectors')renderSectors();});
 window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);
   if(h&&h!==DATE&&IDX.dates.includes(h))show(h);});
 boot();
@@ -1023,12 +1038,48 @@ boot();
 """
 
 
+def write_sectors(out: str, listed: str = sm.DEFAULT_PATH) -> str | None:
+    """data/sectors.json — the map the browser joins the floor sheet against.
+
+    Rewritten on every build and deliberately not cached. It is 37 KB, and the
+    whole point of joining in the browser is that a new listing re-maps every
+    session in the archive without a single parquet being reopened. A missing
+    listing csv is a warning rather than a failure: the site still builds, the
+    Sectors tab just says where the map went.
+    """
+    try:
+        m = sm.load(listed)
+    except FileNotFoundError as e:
+        print(f"WARNING: {e}\n         The Sectors tab will be empty.")
+        return None
+    p = sm.write_payload(m, out)
+    print(f"Sector map: {p} ({os.path.getsize(p) / 1024:,.0f} KB, "
+          f"{len(m)} securities)")
+    return p
+
+
+def _read_sectors(site_dir: str):
+    p = os.path.join(site_dir, "data", "sectors.json")
+    if not os.path.exists(p):
+        return None
+    with open(p, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _render(embed: str) -> str:
+    """APP with the sector blocks filled in and the payload slot set."""
+    return (APP.replace("__SECTOR_CSS__", sv.SECTOR_CSS)
+               .replace("__SECTOR_PANEL__", sv.SECTOR_PANEL)
+               .replace("__SECTOR_JS__", sv.SECTOR_JS)
+               .replace("__EMBED__", embed))
+
+
 def build_app(out: str) -> str:
     """The Pages app: fetches its data from data/*.json alongside it."""
     p = os.path.join(out, "index.html")
     os.makedirs(out, exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
-        f.write(APP.replace("__EMBED__", "null"))
+        f.write(_render("null"))
     return p
 
 
@@ -1058,6 +1109,7 @@ def build_offline(site_dir: str, out_html: str, days: int = 22) -> str:
             "brokers": {}, "scrips": {},
         },
         "days": {},
+        "sectors": _read_sectors(site_dir),
     }
     mask = [i for i, d in enumerate(panel["dates"]) if d in keep]
     for grp in ("brokers", "scrips"):
@@ -1070,7 +1122,7 @@ def build_offline(site_dir: str, out_html: str, days: int = 22) -> str:
     blob = base64.b64encode(
         gzip.compress(json.dumps(payload, separators=(",", ":")).encode(), 6)
     ).decode()
-    html = APP.replace("__EMBED__", '"' + blob + '"')
+    html = _render('"' + blob + '"')
     os.makedirs(os.path.dirname(os.path.abspath(out_html)), exist_ok=True)
     with open(out_html, "w", encoding="utf-8") as f:
         f.write(html)
@@ -1087,9 +1139,12 @@ def main(argv=None) -> int:
                     help="also write a self-contained html here, for mailing")
     ap.add_argument("--offline-days", type=int, default=22,
                     help="sessions to embed in the offline copy (0 = all)")
+    ap.add_argument("--listed", default=sm.DEFAULT_PATH,
+                    help="listed-securities csv behind the sector map")
     args = ap.parse_args(argv)
 
     info = build_site_data(args.archive, args.out, args.rebuild)
+    write_sectors(args.out, args.listed)
     build_app(args.out)
     if args.offline:
         p = build_offline(args.out, args.offline, args.offline_days)
