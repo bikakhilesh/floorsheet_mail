@@ -58,7 +58,8 @@ file and I will re-cut them.
 ## How the pieces fit
 
 ```
-NEPSE /company  ──nepse-listed (08:00 NPT daily)──▶  reference/listed_securities.csv
+NEPSE /company        ─┐
+NEPSE /promoter-share ─┴─nepse-listed (08:00 NPT daily)──▶  reference/listed_securities.csv
                                                               │  committed to main
                                                               │  only when a security changed
                                                               ▼
@@ -88,7 +89,14 @@ map normally leads the floor sheet rather than chasing it.
 
 Two jobs:
 
-**`listed`** — scrape, canonicalise, diff against what is committed.
+**`listed`** — scrape both pages, canonicalise, diff against what is committed.
+
+The two pages behave nothing alike. `/company` has filter dropdowns and a
+page-size control, so it is walked as 15 instrument × status combinations.
+`/promoter-share` has neither — it is ngx-pagination over 15 pages of 20, and the
+walk polls the first symbol after each click rather than sleeping a fixed
+interval, because Angular swaps the table body in place and a fixed sleep races
+the re-render into silently re-reading the page you were already on.
 
 - **No change → nothing happens.** No commit, no rebuild, no mail. The job goes
   green and stops.
@@ -96,9 +104,12 @@ Two jobs:
   `reference/listed_changelog.md`. `git log -p reference/` becomes your listing
   calendar.
 - **Implausible scrape → nothing is written and the job fails red.** Gates: at
-  least 300 rows, at least 95% of currently-active symbols must come back, at
-  least 80% of all known symbols. A page that half-renders would otherwise blank
-  the sector map for every dashboard reading the file. `--force` overrides.
+  least 300 rows from `/company` and 150 from the promoter register, at least 300
+  combined, at least 95% of currently-active symbols must come back, at least 80%
+  of all known symbols. The per-source floors matter: if the promoter page breaks
+  while `/company` is fine, the combined count still looks plausible and only
+  those catch it. A page that half-renders would otherwise blank the sector map
+  for every dashboard reading the file. `--force` overrides.
 
 **`publish`** — runs only when the change was *material*: a symbol added or gone,
 or a sector, instrument or status that moved. A changed email address gets
@@ -130,8 +141,23 @@ flow into banking. `sector_map.py` derives a `group`: equities keep their sector
 everything else moves to `Debenture`, `Mutual Fund` or `Preference Share`. The
 tab defaults to equity only; the basis selector shows the rest.
 
-From your file: **641 securities, 405 active — 278 active equities, 79
-debentures, 42 mutual funds, 6 preference shares.**
+**Promoter shares keep the parent's sector but not its instrument.** `NABILP`
+groups under Commercial Banks alongside `NABIL` — the turnover is money moving
+through a bank's register either way. But it is restricted stock, locked in and
+needing NRB approval to transfer for a BFI, and it trades at a wide discount to
+the ordinary share, so counting it as free-float equity without saying so would
+overstate participation. It carries `Instrument = "Promoter Share"` and the basis
+selector decides. The sector table gains a **Promoter %** column whenever they
+are included, because a sector that is a third promoter turnover is a sector
+whose "flow" is mostly register transfers.
+
+Note that nothing infers a parent from the symbol. It cannot: of the 289 promoter
+lines, **146 end in `PO`, 140 in `P`, and 3 in neither** — `MBLPO` but `NABILP`,
+`KBLPO` but `SHINEP`. NEPSE's promoter page states the sector outright, and that
+is what gets used.
+
+Totals: **930 securities, ~531 active — 278 active equities, 126 active promoter
+lines, 79 debentures, 42 mutual funds, 6 preference shares.**
 
 **Delisted names are kept.** They cost nothing and they are what lets you open a
 2026 floor sheet in 2028 and still resolve a symbol that has since gone.
@@ -149,7 +175,9 @@ tabs do.
 
 **Sector composition** — turnover, share, volume, trades, scrips traded against
 scrips listed, participation, average ticket, top-3 concentration, and breadth
-(share of the sector's traded names closing at or above their own VWAP).
+(share of the sector's traded names closing at or above their own VWAP). The
+basis selector runs **Equity only** (default) / **Equity + promoter** / **All
+instruments**, and a **Promoter %** column appears on the latter two.
 
 **Where the money went / Rotation** — turnover share for the selection, and the
 change in that share against the *preceding window of equal length*. A single day
@@ -202,15 +230,18 @@ bash tests/run.sh
 ```
 
 Extracts the tab's js out of `sector_view.py`, syntax-checks it, then runs it
-against a synthetic six-session archive containing a deliberate bonus issue and a
-deliberately illiquid name. 45 assertions: the chain-linked index is checked
-against an independently written implementation, the corporate-action drop and
-the liquidity floor are checked to actually exclude what they claim to, share
-drifts are checked to sum to zero, and every render function is called so a typo
-surfaces here rather than on Pages.
+against a synthetic six-session archive containing a deliberate bonus issue, a
+deliberately illiquid name and a promoter line priced at a discount to its
+parent. 54 assertions: the chain-linked index is checked against an
+independently written implementation on every basis, the corporate-action drop
+and the liquidity floor are checked to actually exclude what they claim to,
+promoter turnover is checked to land in the parent sector and to move the index
+when included, share drifts are checked to sum to zero, and every render function
+is called so a typo surfaces here rather than on Pages.
 
-It found one real bug on the first run — a sector present in today's selection
-but absent from `panel.json` crashed the stacked area chart.
+It has found two real bugs so far: a sector present in today's selection but
+absent from `panel.json` crashed the stacked area chart, and an empty
+`sector_overrides.csv` raised rather than being ignored.
 
 ---
 

@@ -7,9 +7,13 @@ SEC = SECTORS_JSON;
 /* An independent implementation of the chain-linked index. If this and the
    dashboard agree, the dashboard is at least not disagreeing with itself. */
 function refIndex(basis) {
+  const keeps = inst =>
+    basis === 'all' ? true
+    : basis === 'equityprom' ? (inst === 'Equity' || inst === 'Promoter Share')
+    : inst === 'Equity';
   const grp = sym => {
     const r = SECTORS_JSON.sym[sym];
-    if (basis === 'equity' && SECTORS_JSON.instruments[r[2]] !== 'Equity') return null;
+    if (!keeps(SECTORS_JSON.instruments[r[2]])) return null;
     return SECTORS_JSON.groups[r[1]];
   };
   const acc = {};
@@ -118,12 +122,40 @@ if (dr) {
      .reduce((a, k) => a + dr[k], 0), 0, 1e-9), 'drifts sum to zero');
 }
 
+console.log('\nbasis = equity + promoter');
+SECOPT.basis = 'equityprom'; SECPAN = null; SECRET = null;
+const AP = secAgg();
+const bankP = AP.find(o => o.g === 'Commercial Banks');
+ok(!AP.find(o => o.g === 'Promoter Share'),
+   'promoter shares do not form a bucket of their own');
+ok(bankP.n === 3, 'AAAP joins its parent sector rather than standing apart',
+   'got ' + bankP.n);
+ok(close(bankP.turnover, (150 + 80 + 12) * LAKH), 'promoter turnover is included',
+   'got ' + bankP.turnover);
+ok(bankP.nProm === 1 && close(bankP.promPct, 100 * 12 / 242, 1e-9),
+   'promoter share of sector turnover is reported',
+   'got ' + bankP.promPct);
+ok(bankP.listed === 3, 'the listed count follows the basis', 'got ' + bankP.listed);
+ok(AP.find(o => o.g === 'Hydropower').nProm === 0,
+   'a sector with no promoter line reports none');
+ok(!AP.find(o => o.g === 'Debenture'),
+   'the promoter basis still excludes debentures');
+const RP = secReturns(), refP = refIndex('equityprom');
+ok(RP.g['Commercial Banks'].idx.every((v, i) =>
+     close(v, refP['Commercial Banks'][i], 1e-9)),
+   'the bank index re-weights once the promoter line is in it',
+   '\n        js  ' + RP.g['Commercial Banks'].idx.map(v => v.toFixed(5)).join(' ') +
+   '\n        ref ' + refP['Commercial Banks'].map(v => v.toFixed(5)).join(' '));
+ok(!close(RP.g['Commercial Banks'].idx[5], R.g['Commercial Banks'].idx[5]),
+   'and that actually moves the number, so the basis is not cosmetic');
+
 console.log('\nbasis = all instruments');
 SECOPT.basis = 'all'; SECPAN = null; SECRET = null;
 const A2 = secAgg();
 ok(!!A2.find(o => o.g === 'Debenture'), 'debentures appear on the all basis');
-ok(close(A2.find(o => o.g === 'Commercial Banks').turnover, (150 + 80) * LAKH),
-   'the bank bucket is unchanged when debentures are shown separately');
+ok(close(A2.find(o => o.g === 'Commercial Banks').turnover, (150 + 80 + 12) * LAKH),
+   'the bank bucket carries its promoter line but not its debenture',
+   'got ' + A2.find(o => o.g === 'Commercial Banks').turnover);
 ok(secReturns().g.Debenture.idx.every(v => close(v, 100)),
    'a flat-VWAP debenture indexes flat');
 
@@ -163,6 +195,10 @@ $('#secBasis').value = 'equity'; $('#secMetric').value = 'turnover';
 
   ok(secGroupAll('DDD') === 'Debenture',
      'the scrips column shows the group whatever the basis');
+  ok(secGroupAll('AAAP') === 'Commercial Banks',
+     'a promoter share reads as its parent sector on the Scrips tab');
+  ok(secIsProm('AAAP') && !secIsProm('AAA'),
+     'promoter and ordinary are still told apart');
   ok(secGroupAll('ZZZ') === 'Unmapped', 'an unknown symbol falls back to Unmapped');
   ok(secOf('ZZZ') === 'Unmapped', 'unknown symbols are bucketed, never dropped');
 

@@ -39,12 +39,26 @@ import pandas as pd
 import sector_map as sm
 
 BASE_URL = "https://www.nepalstock.com/company"
+PROMOTER_URL = "https://www.nepalstock.com/promoter-share"
 
 # Values are the site's own <option> values. "" is "All Instrument", which
 # catches anything NEPSE adds an instrument type for without telling anyone.
 INSTRUMENT_OPTIONS = ["Equity", "", "Mutual Funds",
                       "Non-Convertible Debentures", "Preference Shares"]
 STATUS_OPTIONS = ["A", "S", "D"]          # Active / Suspended / Delisted
+
+# The promoter register is a separate page and behaves nothing like /company:
+# no filter dropdowns, no page-size control, just ngx-pagination over ~15 pages
+# of 20. Its columns are SN, Name, Symbol, Status, Sector Name, Email, Security
+# Name, Website — so the sector is stated outright and nothing has to be
+# inferred from the symbol. Which is just as well: the suffix is not consistent
+# (MBLPO but NABILP, KBLPO but SHINEP, and a few with neither), so any
+# strip-the-suffix-and-look-up-the-parent scheme would be wrong about half the
+# time. Status here is Active / Inactive, not the company page's vocabulary.
+PROMOTER_NEXT_CSS = "li.pagination-next:not(.disabled) a"
+PROMOTER_ROW_CSS = "table tbody tr"
+PROMOTER_SYM_CSS = "table tbody tr td:nth-child(3)"
+MAX_PROMOTER_PAGES = 60
 
 STATUS_XPATH = ("/html/body/app-root/div/main/div/app-company/div/div[2]/div/"
                 "div[2]/select")
@@ -57,7 +71,13 @@ FILTER_BUTTON_XPATH = "//button[contains(@class,'box__filter--search')]"
 # Sanity gates. A scrape that trips one of these is a broken page, not a market
 # event — NEPSE does not delist a fifth of the board overnight. Writing it would
 # silently blank the sector map for every dashboard that reads the file.
+#
+# The two pages are gated separately as well as together: if the promoter page
+# breaks while /company is fine, the combined row count still looks plausible
+# and only the per-source floor catches it.
 MIN_TOTAL_ROWS = 300
+MIN_COMPANY_ROWS = 300
+MIN_PROMOTER_ROWS = 150
 MIN_ACTIVE_RETENTION = 0.95    # share of currently-active symbols that must survive
 MIN_ROW_RETENTION = 0.80       # share of all known symbols that must survive
 
@@ -180,9 +200,89 @@ def scrape_combo(driver, wait, instrument: str, status: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def scrape(headless: bool = True) -> pd.DataFrame | None:
+def scrape_company(driver, wait) -> pd.DataFrame:
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support import expected_conditions as EC
+
+    driver.get(BASE_URL)
+    wait.until(EC.presence_of_element_located((By.XPATH, INSTRUMENT_XPATH)))
+    time.sleep(2)                        # let Angular finish the first render
+
+    frames = []
+    for inst in INSTRUMENT_OPTIONS:
+        for st in STATUS_OPTIONS:
+            label = f"{inst or 'All Instrument'}/{st}"
+            try:
+                df = scrape_combo(driver, wait, inst, st)
+                print(f"  {label:<34} {len(df):>4} rows")
+                if not df.empty:
+                    frames.append(df)
+            except Exception:            # noqa: BLE001 — one bad combo is not fatal
+                print(f"  {label:<34} FAILED")
+                traceback.print_exc()
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def _first_symbol(driver) -> str:
+    from selenium.webdriver.common.by import By
+    cells = driver.find_elements(By.CSS_SELECTOR, PROMOTER_SYM_CSS)
+    return cells[0].text.strip() if cells else ""
+
+
+def scrape_promoter(driver, wait) -> pd.DataFrame:
+    """Walk the promoter register page by page.
+
+    Angular swaps the table body in place, so waiting a fixed interval after a
+    click races the re-render and silently re-reads the page you were already
+    on. Poll the first symbol instead and move on the moment it changes; a page
+    whose symbol never changes ends the walk rather than looping to the cap.
+    """
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support import expected_conditions as EC
+
+    driver.get(PROMOTER_URL)
+    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, PROMOTER_ROW_CSS)))
+    time.sleep(1.5)
+
+    frames, pages = [], 0
+    for _ in range(MAX_PROMOTER_PAGES):
+        before = _first_symbol(driver)
+        try:
+            frames.append(pd.concat(pd.read_html(StringIO(driver.page_source)),
+                                    ignore_index=True))
+            pages += 1
+        except ValueError:
+            print("  promoter: no table on this page, stopping")
+            break
+
+        nxt = driver.find_elements(By.CSS_SELECTOR, PROMOTER_NEXT_CSS)
+        if not nxt:
+            break                                    # last page
+        driver.execute_script("arguments[0].click();", nxt[0])
+
+        for _ in range(40):                          # up to 10s for the re-render
+            time.sleep(0.25)
+            if _first_symbol(driver) not in ("", before):
+                break
+        else:
+            print("  promoter: page did not advance, stopping")
+            break
+
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    # Normalise here rather than after the concat with /company: this page calls
+    # the sector column "Sector Name", and letting both spellings reach the
+    # combined frame would end in two columns sharing one label.
+    out = out.rename(columns={"Sector Name": "Sector"})
+    out = out.drop(columns=[c for c in ("Security Name",) if c in out.columns])
+    # No instrument column on this page — every row on it is a promoter share.
+    out["Instrument"] = sm.PROMOTER
+    print(f"  {'promoter register':<34} {len(out):>4} rows over {pages} page(s)")
+    return out
+
+
+def scrape(headless: bool = True) -> tuple[pd.DataFrame, pd.DataFrame] | None:
     from selenium.webdriver.support.ui import WebDriverWait
 
     driver = init_driver(headless)
@@ -190,26 +290,17 @@ def scrape(headless: bool = True) -> pd.DataFrame | None:
         return None
 
     wait = WebDriverWait(driver, 20)
-    frames = []
     try:
-        driver.get(BASE_URL)
-        wait.until(EC.presence_of_element_located((By.XPATH, INSTRUMENT_XPATH)))
-        time.sleep(2)                    # let Angular finish the first render
-
-        for inst in INSTRUMENT_OPTIONS:
-            for st in STATUS_OPTIONS:
-                label = f"{inst or 'All Instrument'}/{st}"
-                try:
-                    df = scrape_combo(driver, wait, inst, st)
-                    print(f"  {label:<34} {len(df):>4} rows")
-                    if not df.empty:
-                        frames.append(df)
-                except Exception:        # noqa: BLE001 — one bad combo is not fatal
-                    print(f"  {label:<34} FAILED")
-                    traceback.print_exc()
-        if not frames:
+        company = scrape_company(driver, wait)
+        try:
+            promoter = scrape_promoter(driver, wait)
+        except Exception:                # noqa: BLE001 — gated below, not here
+            print("  promoter register FAILED")
+            traceback.print_exc()
+            promoter = pd.DataFrame()
+        if company.empty and promoter.empty:
             return None
-        return pd.concat(frames, ignore_index=True)
+        return company, promoter
     finally:
         driver.quit()
 
@@ -217,7 +308,17 @@ def scrape(headless: bool = True) -> pd.DataFrame | None:
 # ────────────────────────────────────────────────────────────────────────────
 # Gates, output
 # ────────────────────────────────────────────────────────────────────────────
-def gate(new: pd.DataFrame, old: pd.DataFrame | None) -> tuple[bool, str]:
+def gate(new: pd.DataFrame, old: pd.DataFrame | None,
+         n_company: int | None = None,
+         n_promoter: int | None = None) -> tuple[bool, str]:
+    # Per-source first. If the promoter page breaks while /company is fine, the
+    # combined count still looks plausible and only this catches it.
+    if n_company is not None and n_company < MIN_COMPANY_ROWS:
+        return False, (f"the company page returned {n_company} rows, floor is "
+                       f"{MIN_COMPANY_ROWS}")
+    if n_promoter is not None and n_promoter < MIN_PROMOTER_ROWS:
+        return False, (f"the promoter register returned {n_promoter} rows, floor "
+                       f"is {MIN_PROMOTER_ROWS}")
     if len(new) < MIN_TOTAL_ROWS:
         return False, (f"only {len(new)} rows scraped, floor is {MIN_TOTAL_ROWS} "
                        f"— the page almost certainly did not load")
@@ -277,8 +378,11 @@ def main(argv=None) -> int:
     ap.add_argument("--changelog", default=os.path.join("reference",
                                                         "listed_changelog.md"))
     ap.add_argument("--from-csv", default=None,
-                    help="skip the browser and treat this csv as the scrape "
-                         "(for testing the diff path)")
+                    help="skip the browser and treat this csv as the /company "
+                         "scrape (for testing the diff path)")
+    ap.add_argument("--from-promoter-csv", default=None,
+                    help="likewise for the promoter register; Instrument is "
+                         "filled in for you")
     ap.add_argument("--check", action="store_true",
                     help="report the diff, write nothing")
     ap.add_argument("--force", action="store_true",
@@ -289,24 +393,38 @@ def main(argv=None) -> int:
     print(dt.datetime.now(dt.timezone.utc).strftime(
         "get_listed_securities  %Y-%m-%d %H:%M UTC"))
 
+    n_company = n_promoter = None
     if args.from_csv:
-        raw = pd.read_csv(args.from_csv, dtype=str, keep_default_na=False)
+        parts = [pd.read_csv(args.from_csv, dtype=str, keep_default_na=False)]
+        if args.from_promoter_csv:
+            p = pd.read_csv(args.from_promoter_csv, dtype=str,
+                            keep_default_na=False)
+            p = p.rename(columns={"Sector Name": "Sector"})
+            p["Instrument"] = sm.PROMOTER
+            parts.append(p)
+        raw = pd.concat(parts, ignore_index=True)
     else:
-        raw = scrape(headless=not args.no_headless)
-        if raw is None:
+        got = scrape(headless=not args.no_headless)
+        if got is None:
             print("Nothing scraped.", file=sys.stderr)
             gh_output(changed="false", material="false", ok="false")
             return 3
+        company, promoter = got
+        n_company, n_promoter = len(company), len(promoter)
+        raw = pd.concat([company, promoter], ignore_index=True)
 
     new = sm.canonicalise(raw)
     print(f"\n{len(raw):,} raw rows -> {len(new):,} unique securities")
+    counts = new["Instrument"].value_counts()
+    for inst, n in counts.items():
+        print(f"    {inst:<30} {n:>4}")
 
     old = None
     if os.path.exists(args.out):
         old = sm.canonicalise(pd.read_csv(args.out, dtype=str,
                                           keep_default_na=False))
 
-    ok, why = gate(new, old)
+    ok, why = gate(new, old, n_company, n_promoter)
     print(f"Sanity: {'ok' if ok else 'FAILED'} — {why}")
     if not ok and not args.force:
         gh_output(changed="false", material="false", ok="false")

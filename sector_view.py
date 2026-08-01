@@ -76,10 +76,14 @@ SECTOR_PANEL = r"""
       <p class="note">Sectors come from NEPSE's listing table, joined to the floor
         sheet by symbol in the browser. Participation is scrips that traded against
         scrips listed and active. Breadth is the share of a sector's traded names
-        that closed at or above their own VWAP.</p>
+        that closed at or above their own VWAP. Promoter shares keep the parent's
+        sector — <code>NABILP</code> sits in Commercial Banks — but they are a
+        restricted instrument at a discount to the ordinary share, so the basis
+        selector decides whether they count.</p>
       <div class="toolbar">
         <select class="f" id="secBasis">
           <option value="equity" selected>Equity only</option>
+          <option value="equityprom">Equity + promoter</option>
           <option value="all">All instruments</option>
         </select>
         <select class="f" id="secMetric">
@@ -170,6 +174,7 @@ const SECHIDE=new Set();
 const SECPAL=['#0B2545','#C9A227','#1B7F4C','#B02A2A','#3D6EA8','#6B4C9A',
   '#2F8F9D','#C2703D','#4F6D2E','#9A3B5C','#7A5F02','#5E8C6A','#8A6BB1','#A0522D'];
 const MKT='__MKT__';
+const PROM='Promoter Share';
 const MAXRET=0.10;   /* NEPSE daily circuit — past this it is a corporate action */
 const MINTL=1.0;     /* lakh; a name has to trade this much on both days to count */
 
@@ -190,12 +195,24 @@ function secInfo(sym){
 }
 /* basis-independent, for the Scrips tab column */
 function secGroupAll(sym){const i=secInfo(sym);return i?i.group:'Unmapped';}
+function secIsProm(sym){const i=secInfo(sym);return !!i&&i.inst===PROM;}
+/* Does this instrument survive the current basis?
+   equity      ordinary shares only
+   equityprom  ordinary plus the promoter register — same sector either way,
+               so NABIL and NABILP both land in Commercial Banks
+   all         debentures, funds and preference shares as well, each in its own
+               bucket because those are separate asset classes wearing the
+               issuer's sector as a label */
+function secKeeps(inst){
+  if(SECOPT.basis==='all')return true;
+  if(SECOPT.basis==='equityprom')return inst==='Equity'||inst===PROM;
+  return inst==='Equity';
+}
 /* null means "excluded by the current basis" */
 function secOf(sym){
   const i=secInfo(sym);
   if(!i)return 'Unmapped';
-  if(SECOPT.basis==='equity'&&i.inst!=='Equity')return null;
-  return i.group;
+  return secKeeps(i.inst)?i.group:null;
 }
 function secColor(g){
   if(g==='Unmapped')return '#8A94A6';
@@ -209,7 +226,7 @@ function secListedCounts(){
   Object.keys(SEC.sym).forEach(s=>{
     const r=SEC.sym[s];
     if(SEC.statuses[r[3]]!=='Active')return;
-    if(SECOPT.basis==='equity'&&SEC.instruments[r[2]]!=='Equity')return;
+    if(!secKeeps(SEC.instruments[r[2]]))return;
     const g=SEC.groups[r[1]]; c[g]=(c[g]||0)+1;});
   return c;
 }
@@ -220,10 +237,16 @@ function secAgg(){
   SCRIPS.forEach(s=>{
     const g=secOf(s.sym); if(g===null)return;
     let o=m.get(g);
-    if(!o){o={g:g,turnover:0,volume:0,trades:0,n:0,above:0,rng:0,tops:[]};
+    if(!o){o={g:g,turnover:0,volume:0,trades:0,n:0,above:0,rng:0,tops:[],
+              prom:0,nProm:0};
            m.set(g,o);}
     o.turnover+=s.turnover; o.volume+=s.volume; o.trades+=s.trades; o.n++;
     if(s.vwap>0&&s.last>=s.vwap)o.above++;
+    /* Tracked even when promoter shares are excluded, so the column can say 0
+       rather than go missing. A sector that is a third promoter turnover is a
+       sector whose "flow" is mostly register transfers, and that should be
+       visible on the face of the table. */
+    if(secIsProm(s.sym)){o.prom+=s.turnover; o.nProm++;}
     o.rng+=s.rangePct; o.tops.push([s.sym,s.turnover]);
   });
   const tot=[...m.values()].reduce((a,o)=>a+o.turnover,0)||1;
@@ -238,6 +261,7 @@ function secAgg(){
     o.breadth=o.n?100*o.above/o.n:0;
     o.avgTicket=o.trades?o.turnover/o.trades:0;
     o.rangeAvg=o.n?o.rng/o.n:0;
+    o.promPct=o.turnover?100*o.prom/o.turnover:0;
     return o;}).sort((a,b)=>b[key]-a[key]);
 }
 function secUnmapped(){
@@ -448,7 +472,7 @@ async function renderSectors(){
       '<code>reference/sector_overrides.csv</code>.</div>'
     : '';
 
-  makeTable('tSector',[
+  const secCols=[
     {k:'g',h:'Sector',f:r=>r.g},
     {k:'turnover',h:'Turnover',num:1,sort:1,f:r=>npr(r.turnover,'')},
     {k:'share',h:'Share %',num:1,f:r=>r.share.toFixed(1)},
@@ -460,8 +484,13 @@ async function renderSectors(){
     {k:'avgTicket',h:'Avg ticket',num:1,f:r=>npr(r.avgTicket,'')},
     {k:'top3',h:'Top-3 %',num:1,f:r=>r.top3.toFixed(0)},
     {k:'breadth',h:'Above VWAP %',num:1,f:r=>r.breadth.toFixed(0),
-     cls:r=>r.breadth>=50?'pos':'neg'}],
-    ()=>A, g=>openSector(g))();
+     cls:r=>r.breadth>=50?'pos':'neg'}];
+  /* Only worth a column once promoter shares are actually in the numbers —
+     under the equity basis it would be a column of zeroes. */
+  if(SECOPT.basis!=='equity')
+    secCols.splice(3,0,{k:'promPct',h:'Promoter %',num:1,
+      f:r=>r.nProm?r.promPct.toFixed(1):'—'});
+  makeTable('tSector',secCols,()=>A, g=>openSector(g))();
 
   barList($('#secShareBars'),A.slice(0,14).map(o=>({k:o.g,v:o.turnover,
     t:npr(o.turnover,'')+' · '+o.share.toFixed(1)+'%',
@@ -603,6 +632,7 @@ function openSector(g){
      ['Volume',num(o.volume)],['Trades',num(o.trades)],
      ['Traded / listed',o.n+' / '+(o.listed||'—')],
      ['Above VWAP',o.breadth.toFixed(0)+'%'],
+     ['Promoter',o.nProm?o.promPct.toFixed(1)+'% of turnover':'—'],
      ['1d',fp(secRet(g,e,1))],['21d',fp(secRet(g,e,21))]]
     .map(([l,v])=>'<div>'+l+'<b>'+v+'</b></div>').join('')+'</div>'+
     '<h3 class="sec">Scrips by turnover</h3><div id="dSecScrips"></div>'+

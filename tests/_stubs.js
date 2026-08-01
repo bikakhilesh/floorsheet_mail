@@ -60,24 +60,29 @@ const SP = {
   DDD: [[10, 12, 11, 13, 14, 15],       [1000, 1000, 1000, 1000, 1000, 1000]],
   EEE: [[20, 22, 21, 23, 24, 25],       [50, 60, 55, 57, 58, 59]],  // +20% on d2
   FFF: [[0.5, 0.6, 0.4, 0.5, 0.5, 0.6], [90, 92, 94, 96, 98, 100]], // under 1 lakh
+  // AAA's promoter line: same sector, own instrument, priced at a discount the
+  // way NEPSE promoter shares actually trade
+  AAAP: [[8, 9, 7, 10, 11, 12],         [120, 122, 126, 123, 125, 128]],
 };
 let PANEL = { dates: DATES, brokers: {}, scrips: SP };
 let DATE = DATES[5];
 async function ensurePanel() { return PANEL; }
 
 const SECTORS_JSON = {
-  generated: 'test', n: 6,
+  generated: 'test', n: 7,
   sectors: ['Commercial Banks', 'Hydropower'],
   groups: ['Commercial Banks', 'Debenture', 'Hydropower'],
-  instruments: ['Equity', 'Non-Convertible Debentures'],
+  instruments: ['Equity', 'Non-Convertible Debentures', 'Promoter Share'],
   statuses: ['Active'],
   sym: {
     AAA: [0, 0, 0, 0], BBB: [0, 0, 0, 0],
     CCC: [1, 2, 0, 0], EEE: [1, 2, 0, 0], FFF: [1, 2, 0, 0],
     DDD: [0, 1, 1, 0],                       // bank-issued debenture
+    AAAP: [0, 0, 2, 0],                      // promoter: bank group, own instrument
   },
   name: { AAA: 'Alpha Bank', BBB: 'Beta Bank', CCC: 'Chandi Power',
-          DDD: 'Alpha Debenture', EEE: 'Everest Power', FFF: 'Fewa Power' },
+          DDD: 'Alpha Debenture', EEE: 'Everest Power', FFF: 'Fewa Power',
+          AAAP: 'Alpha Bank Promoter Share' },
 };
 
 let SCRIPS = Object.keys(SP).map(sym => {

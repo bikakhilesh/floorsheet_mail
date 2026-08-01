@@ -7,7 +7,7 @@ The floor sheet gives us a symbol and nothing else. Every sector-level number in
 the dashboard is a join against this map, so the join has to be honest about a
 few things NEPSE's own listing table is not.
 
-Two decisions worth knowing about before you read a sector number:
+Three decisions worth knowing about before you read a sector number:
 
 1.  **Non-equity instruments carry their issuer's sector.** NEPSE files
     `SEF` (Siddhartha Equity Fund) and `NICAD85/86` (a NIC Asia debenture) under
@@ -19,11 +19,24 @@ Two decisions worth knowing about before you read a sector number:
     `Preference Share`. The dashboard aggregates on `group` and defaults to
     equity only.
 
-2.  **One symbol can appear more than once in the scrape.** The scraper walks
+2.  **Promoter shares keep the parent's sector but not its instrument.**
+    `NABILP` groups under Commercial Banks alongside `NABIL`, because the
+    turnover is money moving through a bank's register either way. But it is a
+    restricted instrument — locked in, and for a BFI the transfer needs NRB
+    approval — and it trades at a wide discount to the ordinary share, so
+    pooling it into "equity" without saying so would overstate free-float
+    activity. It carries `Instrument = "Promoter Share"`, and the dashboard's
+    basis selector decides whether it counts. Note that the promoter symbol
+    suffix is *not* consistent (`MBLPO` but `NABILP`, and three names with
+    neither), so nothing here infers a parent from the symbol — NEPSE's promoter
+    page states the sector outright and that is what gets used.
+
+3.  **One symbol can appear more than once in the scrape.** The scraper walks
     instrument x status combinations, so a name captured under both the "Equity"
     and the "All Instrument" pass shows up twice. Dedup keeps the row with the
-    most authoritative status (Active > Suspended > Delisted) and then the most
-    specific instrument, rather than whichever pass happened to run first.
+    most authoritative status (Active > Suspended > Inactive > Delisted) and
+    then the most specific instrument, rather than whichever pass happened to
+    run first.
 
 Delisted names are kept. They cost nothing, and they are what lets you open a
 2026 floor sheet in 2028 and still resolve a symbol that has since gone.
@@ -56,7 +69,18 @@ CANON_COLS = ["Symbol", "Name", "Sector", "Instrument", "Status",
 # rebuilding the dashboard for; a changed email address is not.
 MATERIAL_COLS = ["Symbol", "Name", "Sector", "Instrument", "Status"]
 
-# Equities keep their sector. Everything else is its own bucket — see note 1.
+# Instrument label for the promoter register. NEPSE's promoter page has no
+# instrument column — every row on it is one of these — so it is synthesised
+# during the scrape.
+PROMOTER = "Promoter Share"
+
+# Equities keep their sector. Debentures, funds and preference shares become
+# their own bucket, because they are different asset classes wearing the
+# issuer's sector as a label — see note 1.
+#
+# Promoter shares are deliberately absent from this mapping: they fall through
+# and keep the parent's sector, which is the point of note 2. What separates
+# them is the instrument, which the dashboard's basis selector filters on.
 GROUP_BY_INSTRUMENT = {
     "Mutual Funds": "Mutual Fund",
     "Non-Convertible Debentures": "Debenture",
@@ -74,9 +98,11 @@ SECTOR_DISPLAY = {
     "Others": "Others",
 }
 
-STATUS_RANK = {"Active": 0, "Suspended": 1, "Delisted": 2}
-INSTRUMENT_RANK = {"Equity": 0, "Mutual Funds": 1,
-                   "Non-Convertible Debentures": 2, "Preference Shares": 3}
+# "Inactive" is the promoter page's vocabulary; the company page says
+# Suspended / Delisted. Both are kept as NEPSE writes them.
+STATUS_RANK = {"Active": 0, "Suspended": 1, "Inactive": 2, "Delisted": 3}
+INSTRUMENT_RANK = {"Equity": 0, PROMOTER: 1, "Mutual Funds": 2,
+                   "Non-Convertible Debentures": 3, "Preference Shares": 4}
 
 UNMAPPED = "Unmapped"
 
@@ -100,12 +126,30 @@ def canonicalise(df: pd.DataFrame) -> pd.DataFrame:
 
     # Tolerate the header variants the site has used ("Company Name", "Stock
     # Symbol") as well as an already-canonical file.
+    # "sector name" and "security name" are the promoter page's headers; it
+    # calls the sector column one thing and the company page calls it another.
     alias = {"company name": "Name", "company": "Name", "name": "Name",
              "stock symbol": "Symbol", "symbol": "Symbol",
-             "sector": "Sector", "instrument": "Instrument",
+             "sector": "Sector", "sector name": "Sector",
+             "instrument": "Instrument",
              "status": "Status", "email": "Email", "website": "Website"}
     df = df.rename(columns={c: alias[c.lower()] for c in df.columns
                             if c.lower() in alias})
+
+    # A frame built by concatenating the two pages can carry both "Sector" and
+    # "Sector Name", and the rename above turns those into two columns wearing
+    # the same label — after which df["Sector"] hands back a 2-wide frame and
+    # everything downstream misbehaves quietly. Coalesce, first non-blank wins.
+    if df.columns.duplicated().any():
+        merged = {}
+        for c in dict.fromkeys(df.columns):
+            block = df.loc[:, df.columns == c]
+            s = block.iloc[:, 0].astype("string")
+            for k in range(1, block.shape[1]):
+                nxt = block.iloc[:, k].astype("string")
+                s = s.where(s.notna() & (s.str.strip() != ""), nxt)
+            merged[c] = s
+        df = pd.DataFrame(merged)
 
     for c in CANON_COLS:
         if c not in df.columns:
@@ -156,7 +200,14 @@ def load(path: str = DEFAULT_PATH,
     df = canonicalise(pd.read_csv(path, dtype=str, keep_default_na=False))
 
     if overrides and os.path.exists(overrides):
-        ov = canonicalise(pd.read_csv(overrides, dtype=str, keep_default_na=False))
+        try:
+            ov = canonicalise(pd.read_csv(overrides, dtype=str,
+                                          keep_default_na=False))
+        except pd.errors.EmptyDataError:
+            # A header-only or zero-byte overrides file is the normal resting
+            # state — it ships empty. Nothing to apply is not a failure, and it
+            # must never be able to take a dashboard build down.
+            ov = pd.DataFrame(columns=CANON_COLS)
         if len(ov):
             df = (pd.concat([df[~df["Symbol"].isin(ov["Symbol"])], ov])
                     .sort_values("Symbol").reset_index(drop=True))
@@ -291,12 +342,21 @@ def main(argv=None) -> int:
 
     act = m[m["Status"] == "Active"]
     eq = act[act["Instrument"] == "Equity"]
-    print(f"{len(m)} securities · {len(act)} active · {len(eq)} active equity")
-    print("\nActive equity by sector")
+    pr = act[act["Instrument"] == PROMOTER]
+    print(f"{len(m)} securities · {len(act)} active · {len(eq)} active equity "
+          f"· {len(pr)} active promoter")
+
+    print("\nActive equity by sector          (promoter alongside)")
+    pc = pr["group"].value_counts()
     for s, n in eq["group"].value_counts().items():
-        print(f"  {s:<30} {n:>4}")
-    print("\nActive non-equity")
-    for s, n in act[act["Instrument"] != "Equity"]["group"].value_counts().items():
+        p = pc.get(s, 0)
+        print(f"  {s:<30} {n:>4}  {('+' + str(p)) if p else '':>5}")
+
+    # Grouped by instrument, not by group: promoter shares deliberately carry
+    # the parent's sector, so listing them by group would just repeat the block
+    # above.
+    print("\nActive by instrument")
+    for s, n in act["Instrument"].value_counts().items():
         print(f"  {s:<30} {n:>4}")
 
     if args.json:
