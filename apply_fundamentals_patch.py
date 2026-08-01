@@ -26,9 +26,12 @@ NEEDS = "__SECTOR_JS__"        # the sector patch must have run first
 
 EDITS: list[tuple[str, str, str]] = [
 
+    # `fv` is already floorsheet_viz — binding fundamentals_view to it shadows
+    # the module build_site_data calls for filename_date, and the build dies on
+    # the first parquet it looks at. Hence `fdv`.
     ("import fundamentals modules",
      "import sector_map as sm\nimport sector_view as sv\n",
-     "import fundamentals as fm\nimport fundamentals_view as fv\n"
+     "import fundamentals as fm\nimport fundamentals_view as fdv\n"
      "import sector_map as sm\nimport sector_view as sv\n"),
 
     ("css placeholder",
@@ -139,9 +142,9 @@ def _read_sectors(site_dir: str):'''),
      '    return (APP.replace("__SECTOR_CSS__", sv.SECTOR_CSS)\n'
      '               .replace("__SECTOR_PANEL__", sv.SECTOR_PANEL)\n'
      '               .replace("__SECTOR_JS__", sv.SECTOR_JS)\n'
-     '               .replace("__FUND_CSS__", fv.FUND_CSS)\n'
-     '               .replace("__FUND_PANEL__", fv.FUND_PANEL)\n'
-     '               .replace("__FUND_JS__", fv.FUND_JS)\n'
+     '               .replace("__FUND_CSS__", fdv.FUND_CSS)\n'
+     '               .replace("__FUND_PANEL__", fdv.FUND_PANEL)\n'
+     '               .replace("__FUND_JS__", fdv.FUND_JS)\n'
      '               .replace("__EMBED__", embed))'),
 ]
 
