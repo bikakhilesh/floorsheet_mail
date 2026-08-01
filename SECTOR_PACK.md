@@ -93,10 +93,23 @@ Two jobs:
 
 The two pages behave nothing alike. `/company` has filter dropdowns and a
 page-size control, so it is walked as 15 instrument × status combinations.
-`/promoter-share` has neither — it is ngx-pagination over 15 pages of 20, and the
-walk polls the first symbol after each click rather than sleeping a fixed
-interval, because Angular swaps the table body in place and a fixed sleep races
-the re-render into silently re-reading the page you were already on.
+`/promoter-share` has neither — it is ngx-pagination over 15 pages of 20.
+
+Three things that walk has to get right, all learned the hard way:
+
+- **Every DOM read is a single `execute_script`.** Locating an element and then
+  reading or clicking it are two round trips, and the gap between them is exactly
+  the moment the walk is waiting for — Angular swaps the tbody, the handle dies,
+  `StaleElementReferenceException`. Query and act in one call and there is no
+  handle to go stale.
+- **Advancing is confirmed, not assumed.** The poll watches the first symbol
+  change rather than sleeping a fixed interval, because a fixed sleep races the
+  re-render into silently re-reading the page you were already on.
+- **Every early exit raises.** A walk that gives up at page eight still returns
+  ~160 rows, clears the 150 floor, and would commit a truncated register with the
+  job green. The only clean ending is running out of pages; the walk is then
+  retried from page one up to three times, since a mistimed re-render is
+  uncorrelated between attempts.
 
 - **No change → nothing happens.** No commit, no rebuild, no mail. The job goes
   green and stops.
@@ -226,10 +239,18 @@ since the listing or the symbol needs an override row.
 ## Tests
 
 ```bash
-bash tests/run.sh
+bash tests/run.sh                    # both suites
+python tests/test_promoter_walk.py   # the walk alone, no node needed
 ```
 
-Extracts the tab's js out of `sector_view.py`, syntax-checks it, then runs it
+`test_promoter_walk.py` drives the pagination walk against a fake driver that
+reproduces the two things that actually go wrong on that page: a tbody swapped
+between a locate and a read, and a click that lands but never re-renders. The
+invariant it holds is not "did it get rows" but "did it reach the end of the
+register" — a truncated walk must raise, never return. It needs neither a
+browser nor selenium installed.
+
+`run.sh` extracts the tab's js out of `sector_view.py`, syntax-checks it, runs it
 against a synthetic six-session archive containing a deliberate bonus issue, a
 deliberately illiquid name and a promoter line priced at a discount to its
 parent. 54 assertions: the chain-linked index is checked against an
@@ -239,9 +260,11 @@ promoter turnover is checked to land in the parent sector and to move the index
 when included, share drifts are checked to sum to zero, and every render function
 is called so a typo surfaces here rather than on Pages.
 
-It has found two real bugs so far: a sector present in today's selection but
-absent from `panel.json` crashed the stacked area chart, and an empty
-`sector_overrides.csv` raised rather than being ignored.
+Bugs these have caught so far: a sector present in today's selection but absent
+from `panel.json` crashed the stacked area chart; an empty
+`sector_overrides.csv` raised rather than being ignored; and a truncated
+promoter walk returned partial data through the success path where the row floor
+could not see it.
 
 ---
 

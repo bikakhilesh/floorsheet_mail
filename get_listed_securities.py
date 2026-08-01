@@ -224,18 +224,39 @@ def scrape_company(driver, wait) -> pd.DataFrame:
 
 
 def _first_symbol(driver) -> str:
-    from selenium.webdriver.common.by import By
-    cells = driver.find_elements(By.CSS_SELECTOR, PROMOTER_SYM_CSS)
-    return cells[0].text.strip() if cells else ""
+    """The current page's first symbol, read in a single round trip.
+
+    `find_elements` then `.text` is two calls, and the gap between them is
+    precisely the moment this function exists to detect: Angular swaps the
+    tbody, the handle dies, StaleElementReferenceException. Doing the query and
+    the read in one `execute_script` leaves no handle to go stale — the same
+    move `js_select` makes above, for the same reason.
+    """
+    return driver.execute_script(
+        "const c = document.querySelector(arguments[0]);"
+        "return c ? c.textContent.trim() : '';", PROMOTER_SYM_CSS) or ""
 
 
-def scrape_promoter(driver, wait) -> pd.DataFrame:
-    """Walk the promoter register page by page.
+def _click_next(driver) -> bool:
+    """Advance one page. False when there is no next link, i.e. the last page.
 
-    Angular swaps the table body in place, so waiting a fixed interval after a
-    click races the re-render and silently re-reads the page you were already
-    on. Poll the first symbol instead and move on the moment it changes; a page
-    whose symbol never changes ends the walk rather than looping to the cap.
+    Same two-round-trip hazard as `_first_symbol`: locating the anchor and then
+    clicking it are separate calls, and a re-render in between kills the handle.
+    Query and click together.
+    """
+    return bool(driver.execute_script(
+        "const a = document.querySelector(arguments[0]);"
+        "if (!a) return false; a.click(); return true;", PROMOTER_NEXT_CSS))
+
+
+def _walk_promoter(driver, wait) -> pd.DataFrame:
+    """One complete walk of the promoter register, or an exception.
+
+    Every early exit raises rather than returning what it has. A walk that gives
+    up at page eight still yields ~160 rows, which clears MIN_PROMOTER_ROWS and
+    would quietly commit a truncated register — the same failure the caller is
+    careful to avoid on the exception path, arriving through the success path
+    instead. The only clean ending is running out of pages.
     """
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support import expected_conditions as EC
@@ -244,32 +265,35 @@ def scrape_promoter(driver, wait) -> pd.DataFrame:
     wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, PROMOTER_ROW_CSS)))
     time.sleep(1.5)
 
-    frames, pages = [], 0
+    frames, pages, complete = [], 0, False
     for _ in range(MAX_PROMOTER_PAGES):
         before = _first_symbol(driver)
         try:
             frames.append(pd.concat(pd.read_html(StringIO(driver.page_source)),
                                     ignore_index=True))
             pages += 1
-        except ValueError:
-            print("  promoter: no table on this page, stopping")
-            break
+        except ValueError as e:
+            raise RuntimeError(f"no table on promoter page {pages + 1}") from e
 
-        nxt = driver.find_elements(By.CSS_SELECTOR, PROMOTER_NEXT_CSS)
-        if not nxt:
-            break                                    # last page
-        driver.execute_script("arguments[0].click();", nxt[0])
+        if not _click_next(driver):
+            complete = True                          # ran out of pages: done
+            break
 
         for _ in range(40):                          # up to 10s for the re-render
             time.sleep(0.25)
-            if _first_symbol(driver) not in ("", before):
+            now = _first_symbol(driver)
+            if now and now != before:
                 break
         else:
-            print("  promoter: page did not advance, stopping")
-            break
+            raise RuntimeError(
+                f"promoter page {pages} never advanced past {before!r}")
 
+    if not complete:
+        raise RuntimeError(f"promoter walk hit the {MAX_PROMOTER_PAGES}-page cap "
+                           f"without reaching the end")
     if not frames:
-        return pd.DataFrame()
+        raise RuntimeError("promoter walk produced no rows")
+
     out = pd.concat(frames, ignore_index=True)
     # Normalise here rather than after the concat with /company: this page calls
     # the sector column "Sector Name", and letting both spellings reach the
@@ -280,6 +304,27 @@ def scrape_promoter(driver, wait) -> pd.DataFrame:
     out["Instrument"] = sm.PROMOTER
     print(f"  {'promoter register':<34} {len(out):>4} rows over {pages} page(s)")
     return out
+
+
+def scrape_promoter(driver, wait, attempts: int = 3) -> pd.DataFrame:
+    """Retry the walk from the top rather than salvaging a partial one.
+
+    The failure this guards against is a re-render landing in the wrong
+    millisecond, which is uncorrelated between attempts — a coin flip becomes a
+    near-certainty across three. Restarting from page one is cheap (about twenty
+    seconds) and is the only way to get a complete register once a walk has been
+    interrupted.
+    """
+    last = None
+    for i in range(1, attempts + 1):
+        try:
+            return _walk_promoter(driver, wait)
+        except Exception as e:                       # noqa: BLE001 — retried
+            last = e
+            print(f"  promoter attempt {i}/{attempts} failed: {e}")
+            if i < attempts:
+                time.sleep(2.0)
+    raise RuntimeError(f"promoter register failed {attempts} times; last: {last}")
 
 
 def scrape(headless: bool = True) -> tuple[pd.DataFrame, pd.DataFrame] | None:

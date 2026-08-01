@@ -21,3 +21,6 @@ echo "sector.js parses"
 
 cat tests/_stubs.js build/sector.js tests/_asserts.js > build/sector_test.js
 node build/sector_test.js
+
+echo
+python3 tests/test_promoter_walk.py
