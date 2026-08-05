@@ -2,6 +2,13 @@
 
 Written by `get_listed_securities.py`. Newest first.
 
+## 2026-08-05
+
+**New listings (1)**
+
+- `SEF2` — Siddhartha Equity Fund 2 · Commercial Banks · Mutual Funds · Active
+
+
 ## 2026-08-02
 
 **New listings (289)**
