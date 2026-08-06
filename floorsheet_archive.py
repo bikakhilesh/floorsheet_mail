@@ -216,9 +216,40 @@ def cmd_ingest(args) -> int:
     return cmd_manifest(args)
 
 
+def _keep_closest(args) -> bool:
+    """True when the sheet already archived for this date beats the new one.
+
+    A re-scrape of a session we already hold only earns its place if its
+    turnover lands closer to NEPSE's own figure for the day. Ties, and runs
+    with no NEPSE figure to compare against, leave the archive alone.
+    """
+    exp = getattr(args, "expected_turnover", None)
+    if exp is None or not os.path.exists(args.manifest):
+        return False
+    prev = pd.read_csv(args.manifest)
+    if prev.empty or "turnover" not in prev.columns:
+        return False
+    new = summarise(args.file)
+    hit = prev[prev["date"].astype(str) == str(new["date"])]
+    if hit.empty:
+        return False
+    old = hit.iloc[-1]
+    if not os.path.exists(os.path.join(args.dir, str(old["file"]))):
+        return False
+    old_diff = abs(float(old["turnover"]) - exp)
+    new_diff = abs(float(new["turnover"]) - exp)
+    print(f"{new['date']} is already archived. NEPSE turnover Rs {exp:,.2f} — "
+          f"archived sheet is off by Rs {old_diff:,.2f}, "
+          f"the new one by Rs {new_diff:,.2f}.")
+    return old_diff <= new_diff
+
+
 # ────────────────────────────────────────────────────────────────────────────
 def cmd_add(args) -> int:
     os.makedirs(args.dir, exist_ok=True)
+    if _keep_closest(args):
+        print("The archived sheet is closer to NEPSE's turnover — keeping it.")
+        return 0
     dest = os.path.join(args.dir, os.path.basename(args.file))
     if os.path.abspath(args.file) != os.path.abspath(dest):
         shutil.copy2(args.file, dest)
@@ -320,6 +351,9 @@ def main(argv=None) -> int:
     a.add_argument("--repo", default=None, help="clone URL shown in the readme")
     a.add_argument("--keep", type=int, default=0,
                    help="sessions to retain, 0 = keep everything")
+    a.add_argument("--expected-turnover", type=float, default=None,
+                   help="NEPSE's own turnover for the session; on a re-scrape "
+                        "the sheet closest to it wins")
     a.set_defaults(fn=cmd_add)
 
     m = sub.add_parser("manifest", help="rebuild the manifest from the files")
