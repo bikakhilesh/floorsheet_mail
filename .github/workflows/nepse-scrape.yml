@@ -96,10 +96,14 @@ jobs:
             echo "No data branch yet — creating it."
             mkdir -p archive/parquet
           fi
+          # NEPSE's own turnover for the day, written by the scraper. A re-scrape
+          # only replaces an archived session if it lands closer to this figure.
+          EXPECTED=$(cat data/expected_turnover.txt 2>/dev/null || true)
           python floorsheet_archive.py add \
             --file "out/floorsheet_${{ steps.probe.outputs.date }}.parquet" \
             --dir archive/parquet --manifest archive/manifest.csv \
             --readme archive/README.md \
+            ${EXPECTED:+--expected-turnover "$EXPECTED"} \
             --repo "https://github.com/${{ github.repository }}.git"
           cd archive
           git init -q
