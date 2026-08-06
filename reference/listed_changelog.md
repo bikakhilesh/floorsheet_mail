@@ -2,6 +2,14 @@
 
 Written by `get_listed_securities.py`. Newest first.
 
+## 2026-08-06
+
+**New listings (2)**
+
+- `LSH12` — LS Horizon 12 · Commercial Banks · Mutual Funds · Active
+- `SAEF2` — Sanima Equity Fund-2 · Commercial Banks · Mutual Funds · Active
+
+
 ## 2026-08-05
 
 **New listings (1)**
