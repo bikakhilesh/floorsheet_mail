@@ -362,6 +362,11 @@ def main():
         rows = len(df)
         print(f"Data saved to: {saved_path}")
 
+        # The archive keeps whichever copy of a session sits closest to NEPSE's
+        # own turnover, so leave that figure where the later steps can read it.
+        with open(os.path.join(OUTPUT_DIR, "expected_turnover.txt"), "w") as fh:
+            fh.write(f"{expected_amount:.2f}")
+
     except Exception as e:
         status = "ERROR"
         print("FATAL:", e)
