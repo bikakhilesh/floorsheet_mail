@@ -1,0 +1,1967 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEPSE Floor Sheet Analytics</title>
+<style>
+:root{--navy:#0B2545;--gold:#C9A227;--buy:#1B7F4C;--sell:#B02A2A;--ink:#1C2331;
+ --grey:#8A94A6;--line:#E3E8F0;--bg:#F7F9FC;--light:#EEF1F6}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
+ Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg)}
+.wrap{max-width:1280px;margin:0 auto;padding:0 18px 60px}
+header{background:var(--navy);color:#fff;padding:14px 0 0}
+h1{margin:0;font-size:19px;font-weight:700}
+.picker{display:flex;align-items:center;gap:8px;margin:10px 0 4px;flex-wrap:wrap}
+.picker select,.picker input{font:600 13px inherit;padding:5px 8px;border-radius:4px;
+ border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.10);color:#fff}
+.picker select option{color:#000}
+.picker button{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);
+ color:#fff;border-radius:4px;padding:5px 11px;cursor:pointer;font:600 13px inherit}
+.picker button:hover:not(:disabled){background:rgba(255,255,255,.22)}
+.picker button:disabled{opacity:.35;cursor:default}
+.picker .meta{color:#9FB3C8;font-size:12px}
+.kpis{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.kpi{flex:1 1 112px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);
+ border-radius:5px;padding:7px 9px}
+.kpi b{display:block;font-size:15px}
+.kpi span{font-size:10px;color:#9FB3C8;text-transform:uppercase;letter-spacing:.5px}
+.kpi i{font-style:normal;font-size:10.5px;margin-left:5px}
+.up{color:#6FD39B}.down{color:#F09A9A}
+nav{display:flex;gap:2px;margin-top:4px;overflow-x:auto}
+nav button{background:none;border:0;border-bottom:3px solid transparent;color:#9FB3C8;
+ padding:9px 15px;font:600 13px inherit;cursor:pointer;white-space:nowrap}
+nav button:hover{color:#fff}
+nav button.on{color:#fff;border-bottom-color:var(--gold)}
+.panel{display:none;margin-top:18px}.panel.on{display:block}
+.card{background:#fff;border:1px solid var(--line);border-radius:6px;padding:14px 16px;
+ margin-bottom:16px}
+.card h2{margin:0 0 2px;font-size:14px;color:var(--navy);border-left:4px solid var(--gold);
+ padding-left:8px}
+.card p.note{margin:0 0 10px 12px;font-size:11.5px;color:var(--grey)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:880px){.grid2{grid-template-columns:1fr}}
+.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+input[type=search],select.f{border:1px solid var(--line);border-radius:4px;padding:6px 9px;
+ font:13px inherit;background:#fff;color:var(--ink)}
+input[type=search]{min-width:200px}
+.hint{font-size:11.5px;color:var(--grey)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th{background:var(--navy);color:#fff;text-align:left;padding:7px 9px;font-weight:600;
+ cursor:pointer;white-space:nowrap;position:sticky;top:0;z-index:2}
+th.num,td.num{text-align:right}
+th.asc:after{content:"\25B2";margin-left:5px;opacity:.6}
+th.desc:after{content:"\25BC";margin-left:5px;opacity:.6}
+td{padding:5px 9px;border-bottom:1px solid var(--line)}
+tbody tr:nth-child(even){background:#FAFBFD}
+tbody tr.clickable{cursor:pointer}
+tbody tr.clickable:hover{background:#EAF0FA}
+.pos{color:var(--buy);font-weight:600}.neg{color:var(--sell);font-weight:600}
+.tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10.5px;font-weight:600}
+.tag.cross{background:#FBF1D2;color:#7A5F02}.tag.inter{background:var(--light);color:var(--grey)}
+.scroll{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:4px}
+.bar-row{display:grid;grid-template-columns:92px 1fr 104px;gap:8px;align-items:center;
+ margin:3px 0;font-size:12px}
+.bar-row .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar-row .val{text-align:right;color:var(--grey);font-size:11.5px}
+.track{background:var(--light);border-radius:2px;height:16px;position:relative;overflow:hidden}
+.fill{position:absolute;top:0;height:100%;border-radius:2px}
+.mid{position:absolute;top:0;bottom:0;width:1px;background:#C7CEDB}
+.empty{color:var(--grey);font-size:12.5px;padding:14px 4px}
+.stat{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 12px}
+.stat div{background:var(--light);border-radius:4px;padding:6px 10px;font-size:12px}
+.stat b{display:block;color:var(--navy);font-size:13.5px}
+h3.sec{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--grey);
+ margin:16px 0 6px}
+.hm{border-collapse:separate;border-spacing:1px;font-size:10px}
+.hm td{padding:0;width:26px;height:22px;border:0}
+.hm th{background:none;color:var(--ink);font-weight:600;font-size:10px;padding:2px;
+ position:static;cursor:default}
+.hm th.v{writing-mode:vertical-rl;transform:rotate(180deg);height:52px}
+#drawer{position:fixed;top:0;right:0;width:min(520px,94vw);height:100%;background:#fff;
+ border-left:1px solid var(--line);box-shadow:-8px 0 26px rgba(11,37,69,.13);
+ transform:translateX(100%);transition:transform .18s;overflow:auto;z-index:40}
+#drawer.on{transform:none}
+#drawer .dhead{position:sticky;top:0;background:var(--navy);color:#fff;padding:12px 16px;
+ display:flex;justify-content:space-between;align-items:center}
+#drawer .dbody{padding:14px 16px}
+#drawer button.x{background:none;border:0;color:#9FB3C8;font-size:22px;cursor:pointer}
+#tip{position:fixed;pointer-events:none;background:var(--navy);color:#fff;padding:6px 9px;
+ border-radius:4px;font-size:11.5px;opacity:0;z-index:60;white-space:nowrap}
+#load{position:fixed;inset:0;background:rgba(247,249,252,.75);display:none;
+ align-items:center;justify-content:center;z-index:70;font-weight:600;color:var(--navy)}
+#load.on{display:flex}
+#timeline{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+ border-radius:6px;padding:8px 10px 6px;margin:8px 0 4px}
+.tlbar{display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap}
+.tlbar b{font-size:13px}
+.tlbar .sub{color:#9FB3C8;font-size:11.5px}
+.tlbar select,.tlbar button{font:600 12px inherit;padding:3px 8px;border-radius:4px;
+ border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.10);color:#fff;
+ cursor:pointer}
+.tlbar select option{color:#000}
+#tlTrack{position:relative;height:46px;cursor:crosshair;touch-action:none;
+ border-bottom:1px solid rgba(255,255,255,.18)}
+#tlTrack .bk{position:absolute;bottom:0;background:#8FA6BF;border-radius:1px 1px 0 0}
+#tlTrack .bk.on{background:var(--gold)}
+#tlSel{position:absolute;top:0;bottom:0;background:rgba(201,162,39,.16);
+ border-left:2px solid var(--gold);border-right:2px solid var(--gold);pointer-events:none}
+.tlh{position:absolute;top:0;bottom:0;width:11px;margin-left:-5px;cursor:ew-resize;
+ z-index:3}
+.tlh:after{content:"";position:absolute;left:3px;top:50%;margin-top:-9px;width:5px;
+ height:18px;background:var(--gold);border-radius:2px}
+#tlAxis{position:relative;height:14px;color:#9FB3C8;font-size:10px}
+#tlAxis span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+svg.chart{width:100%;height:210px;display:block}
+svg.chart .ax{stroke:#C7CEDB;stroke-width:1}
+svg.chart .gl{stroke:#EDF1F7;stroke-width:1}
+svg.chart text{font-size:10px;fill:var(--grey)}
+footer{color:var(--grey);font-size:11.5px;border-top:1px solid var(--line);
+ margin-top:24px;padding-top:12px}
+
+.legend{display:flex;flex-wrap:wrap;gap:5px;margin:9px 0 2px}
+.legend span{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;
+ padding:2px 8px;border:1px solid var(--line);border-radius:11px;cursor:pointer;
+ background:#fff;user-select:none}
+.legend span:hover{border-color:var(--grey)}
+.legend span.off{opacity:.32}
+.legend i{width:9px;height:9px;border-radius:50%;display:inline-block;flex:0 0 auto}
+.hm.bs td{width:auto;min-width:36px;height:22px}
+.hm.bs td.bc{cursor:pointer;border-radius:2px}
+.hm.bs th{white-space:nowrap;text-align:left}
+.hm.bs th.v{writing-mode:vertical-rl;transform:rotate(180deg);height:96px;
+ text-align:right}
+.pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10.5px;
+ font-weight:600;background:var(--light);color:var(--navy)}
+.warn{background:#FBF1D2;color:#7A5F02;padding:7px 10px;border-radius:4px;
+ font-size:11.5px;margin:0 0 10px}
+.warn b{font-weight:700}
+svg.chart.tall{height:250px}
+.secgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:880px){.secgrid{grid-template-columns:1fr}}
+
+
+.fundbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.stale{background:#FBF1D2;color:#7A5F02;padding:7px 10px;border-radius:4px;
+ font-size:11.5px;margin:0 0 10px}
+.stale b{font-weight:700}
+td.rich{color:var(--sell)}td.cheap{color:var(--buy)}
+.fundgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:880px){.fundgrid{grid-template-columns:1fr}}
+svg.bub{width:100%;height:420px;display:block;overflow:visible}
+svg.bub .gl{stroke:#EDF1F7;stroke-width:1}
+svg.bub .ax{stroke:#C7CEDB;stroke-width:1}
+svg.bub .iso{stroke:#C7CEDB;stroke-width:1;stroke-dasharray:4 3;fill:none}
+svg.bub .isolab{font-size:9.5px;fill:var(--grey)}
+svg.bub .ols{stroke:var(--navy);stroke-width:1.8;stroke-dasharray:6 3}
+svg.bub text{font-size:10px;fill:var(--grey)}
+svg.bub .atitle{font-size:11px;fill:var(--ink);font-weight:600}
+svg.bub circle{cursor:pointer;stroke:#fff;stroke-width:.8}
+svg.bub circle:hover{stroke:var(--ink);stroke-width:1.6}
+svg.bub .plab{font-size:9px;fill:var(--ink);pointer-events:none}
+.fitline{font-size:11.5px;color:var(--grey);margin:6px 0 0 2px}
+.fitline b{color:var(--navy)}
+
+</style></head><body>
+
+<header><div class="wrap">
+  <h1>NEPSE Floor Sheet Analytics</h1>
+  <div class="picker">
+    <span id="dayCtl">
+      <button id="prev" title="Previous session">&lsaquo;</button>
+      <select id="daySel"></select>
+      <input type="date" id="dayDate">
+      <button id="next" title="Next session">&rsaquo;</button>
+      <button id="latest">Latest</button>
+    </span>
+    <span class="meta" id="meta"></span>
+  </div>
+  <div id="timeline">
+    <div class="tlbar">
+      <b id="tlLabel">—</b><span class="sub" id="tlSub"></span>
+      <span style="flex:1"></span>
+      <select id="tlLevel">
+        <option value="day">Days</option>
+        <option value="week">Weeks</option>
+        <option value="month" selected>Months</option>
+        <option value="quarter">Quarters</option>
+      </select>
+      <button id="tlAll">Select all</button>
+    </div>
+    <div id="tlTrack">
+      <div id="tlSel"></div>
+      <div class="tlh" id="tlH0"></div><div class="tlh" id="tlH1"></div>
+    </div>
+    <div id="tlAxis"></div>
+  </div>
+  <div class="kpis" id="kpis"></div>
+  <nav id="tabs">
+    <button data-t="overview" class="on">Overview</button>
+    <button data-t="brokers">Brokers</button>
+    <button data-t="scrips">Scrips</button>
+    <button data-t="sectors">Sectors</button>
+    <button data-t="fund">Fundamentals</button>
+    <button data-t="blocks">Block trades</button>
+    <button data-t="flow">Flow matrix</button>
+    <button data-t="trends">Trends</button>
+  </nav>
+</div></header>
+
+<div class="wrap">
+  <div class="panel on" id="p-overview"><div class="grid2">
+    <div class="card"><h2>Top scrips by turnover</h2>
+      <p class="note">Click for the broker split in that name.</p><div id="ovScrips"></div></div>
+    <div class="card"><h2>Top brokers — buy vs sell</h2>
+      <p class="note">Green right buy, red left sell. Click for the drill-down.</p>
+      <div id="ovBrokers"></div></div>
+  </div><div class="grid2">
+    <div class="card"><h2>Net broker flow</h2>
+      <p class="note">Buy minus sell, house level.</p><div id="ovNet"></div></div>
+    <div class="card"><h2>Session structure</h2><p class="note">Concentration and ticket size.</p>
+      <div id="ovStats"></div></div>
+  </div></div>
+
+  <div class="panel" id="p-brokers"><div class="card">
+    <h2>Broker activity</h2><p class="note">Click a row for scrips and counterparties.</p>
+    <div class="toolbar"><input type="search" id="qBroker" placeholder="Filter broker…">
+      <select class="f" id="fBrokerSide"><option value="">All</option>
+        <option value="buy">Net buyers</option><option value="sell">Net sellers</option></select>
+      <span class="hint" id="cBroker"></span></div>
+    <div class="scroll"><table id="tBroker"></table></div></div></div>
+
+  <div class="panel" id="p-scrips"><div class="card">
+    <h2>Scrip activity</h2><p class="note">Click a row for the broker split.</p>
+    <div class="toolbar"><input type="search" id="qScrip" placeholder="Filter symbol…">
+      <select class="f" id="fScripSector"><option value="">All sectors</option></select>
+      <span class="hint" id="cScrip"></span></div>
+    <div class="scroll"><table id="tScrip"></table></div></div></div>
+
+
+  <div class="panel" id="p-sectors">
+    <div class="card">
+      <h2>Sector composition</h2>
+      <p class="note">Sectors come from NEPSE's listing table, joined to the floor
+        sheet by symbol in the browser. Participation is scrips that traded against
+        scrips listed and active. Breadth is the share of a sector's traded names
+        that closed at or above their own VWAP. Promoter shares keep the parent's
+        sector — <code>NABILP</code> sits in Commercial Banks — but they are a
+        restricted instrument at a discount to the ordinary share, so the basis
+        selector decides whether they count.</p>
+      <div class="toolbar">
+        <select class="f" id="secBasis">
+          <option value="equity" selected>Equity only</option>
+          <option value="equityprom">Equity + promoter</option>
+          <option value="all">All instruments</option>
+        </select>
+        <select class="f" id="secMetric">
+          <option value="turnover">Rank by turnover</option>
+          <option value="volume">Rank by volume</option>
+          <option value="trades">Rank by trades</option>
+        </select>
+        <span class="hint" id="secHint"></span>
+      </div>
+      <div id="secWarn"></div>
+      <div class="scroll"><table id="tSector"></table></div>
+    </div>
+
+    <div class="secgrid">
+      <div class="card"><h2>Where the money went</h2>
+        <p class="note">Share of turnover in the current selection. Click for the
+          sector detail.</p>
+        <div id="secShareBars"></div></div>
+      <div class="card"><h2>Rotation</h2>
+        <p class="note">Change in turnover share against the preceding window of
+          equal length. Right means the sector took share.</p>
+        <div id="secDriftBars"></div></div>
+    </div>
+
+    <div class="card">
+      <h2>Sector price performance</h2>
+      <p class="note">Turnover-weighted VWAP returns, chain-linked, rebased to 100
+        at the start of the window. Only names that traded on both days count, and
+        moves beyond the 10% circuit are dropped as corporate actions rather than
+        clipped. Click a legend chip to hide a series.</p>
+      <div class="toolbar">
+        <select class="f" id="secIdxWin">
+          <option value="0">Full archive</option>
+          <option value="63">Last 63 sessions</option>
+          <option value="21" selected>Last 21 sessions</option>
+          <option value="5">Last 5 sessions</option>
+        </select>
+        <select class="f" id="secIdxN">
+          <option value="6">Top 6 sectors</option>
+          <option value="10" selected>Top 10 sectors</option>
+          <option value="99">All sectors</option>
+        </select>
+        <span class="hint" id="secIdxHint"></span>
+      </div>
+      <div id="secIdxChart"></div>
+      <div class="legend" id="secIdxLegend"></div>
+      <h3 class="sec">Returns and relative strength</h3>
+      <div class="scroll" style="max-height:340px"><table id="tSecRet"></table></div>
+    </div>
+
+    <div class="secgrid">
+      <div class="card"><h2>Turnover share over time</h2>
+        <p class="note">Every session in the archive, normalised to 100%.
+          Hover a band for the day.</p>
+        <div id="secStack"></div>
+        <div class="legend" id="secStackLegend"></div></div>
+      <div class="card"><h2>Breadth and dispersion</h2>
+        <p class="note">Share of each sector's traded names closing at or above
+          VWAP, with the average intraday range alongside.</p>
+        <div id="secBreadth"></div></div>
+    </div>
+
+    <div class="card">
+      <h2>Broker net flow by sector</h2>
+      <p class="note">Buy minus sell for the current selection. Green is
+        accumulation, red distribution. Cells come from the broker x scrip
+        breakdown, which is trimmed at Rs 1 lakh gross, so small positions are
+        absent. Click a cell to open the broker.</p>
+      <div class="toolbar">
+        <select class="f" id="secBrokerN">
+          <option value="12">Top 12 brokers</option>
+          <option value="20" selected>Top 20 brokers</option>
+          <option value="30">Top 30 brokers</option>
+        </select>
+        <span class="hint">Colour is square-root scaled on the largest cell.</span>
+      </div>
+      <div style="overflow:auto"><table class="hm bs" id="tSecBroker"></table></div>
+    </div>
+  </div>
+
+
+  <div class="panel" id="p-fund">
+    <div class="card">
+      <h2>Valuation on the selected session</h2>
+      <p class="note">Multiples are the vendor's own ratios re-priced onto this
+        session's floor sheet — <code>PE x (price / vendor close)</code> — so the
+        earnings and book basis behind them is whatever npstocks used, including
+        the NIA net-worth basis it applies to insurers. Recomputing from the
+        Bookvalue column instead would move every insurance P/B by tens of
+        percent.</p>
+      <div class="fundbar">
+        <select class="f" id="fdPrice">
+          <option value="vwap" selected>Price = session VWAP</option>
+          <option value="last">Price = last contract</option>
+          <option value="close">Price = vendor close (no re-pricing)</option>
+        </select>
+        <select class="f" id="fdMinT">
+          <option value="0">All traded names</option>
+          <option value="10" selected>Turnover ≥ Rs 10 L</option>
+          <option value="100">Turnover ≥ Rs 1 Cr</option>
+        </select>
+        <input type="search" id="fdQ" placeholder="Filter symbol…">
+        <span class="hint" id="fdHint"></span>
+      </div>
+      <div id="fdStale"></div>
+      <div class="scroll"><table id="tFund"></table></div>
+    </div>
+
+    <div class="card">
+      <h2>Sector valuation</h2>
+      <p class="note">Market-cap weighted on the live price, with the median
+        alongside — the weighted number tells you what the sector costs, the
+        median tells you whether one name is carrying it. Only names that traded
+        in this selection are included, so this is the valuation of what actually
+        changed hands, not of the listed universe.</p>
+      <div class="scroll" style="max-height:380px"><table id="tFundSec"></table></div>
+    </div>
+
+    <div class="card">
+      <h2>Valuation and returns</h2>
+      <p class="note">Bubble area is live market cap, colour is sector. Both of
+        these pairs are related by an identity, not by a correlation —
+        <code>ROE = ROA × equity multiplier</code> and
+        <code>P/B = P/E × ROE</code> — so the dashed rays are exact iso-lines,
+        not fitted. Where a name sits between two rays <em>is</em> its leverage,
+        or its ROE. A least-squares line through either is available, but it is
+        fitting scatter around an identity; its residual is a relative-value
+        read, not a relationship.</p>
+      <div class="fundbar">
+        <select class="f" id="fdFit">
+          <option value="iso" selected>Overlay: iso-lines (exact)</option>
+          <option value="ols">Overlay: least squares</option>
+          <option value="none">Overlay: none</option>
+        </select>
+        <select class="f" id="fdScale">
+          <option value="log" selected>Log axes</option>
+          <option value="linear">Linear axes</option>
+        </select>
+        <select class="f" id="fdLabel">
+          <option value="20" selected>Label top 20 by size</option>
+          <option value="0">No labels</option>
+          <option value="999">Label everything</option>
+        </select>
+        <span class="hint">Click a bubble to open the scrip.</span>
+      </div>
+      <div class="fundgrid">
+        <div>
+          <div id="fdPEPB"></div>
+          <div class="fitline" id="fdPEPBFit"></div>
+        </div>
+        <div>
+          <div id="fdROE"></div>
+          <div class="fitline" id="fdROEFit"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fundgrid">
+      <div class="card"><h2>Cheapest by live P/E</h2>
+        <p class="note">Positive earnings only. Click for the scrip.</p>
+        <div id="fdCheap"></div></div>
+      <div class="card"><h2>Biggest move against the vendor close</h2>
+        <p class="note">How far this session's price has travelled from the
+          snapshot the fundamentals were priced at. A large gap means the
+          multiple on the left is doing real work.</p>
+        <div id="fdDrift"></div></div>
+    </div>
+  </div>
+
+
+  <div class="panel" id="p-blocks"><div class="card">
+    <h2>Largest single transactions</h2><p class="note">Cross = same broker both legs.</p>
+    <div class="toolbar"><input type="search" id="qBlock" placeholder="Filter symbol or broker…">
+      <select class="f" id="fBlockType"><option value="">All types</option>
+        <option value="1">Cross only</option><option value="0">Inter-broker only</option></select>
+      <span class="hint" id="cBlock"></span></div>
+    <div class="scroll"><table id="tBlock"></table></div></div></div>
+
+  <div class="panel" id="p-flow"><div class="card">
+    <h2>Broker-to-broker flow matrix</h2>
+    <p class="note">Rows sell, columns buy. Hover for value, click to open the seller.</p>
+    <div class="toolbar"><select class="f" id="fFlowN">
+      <option value="15">Top 15</option><option value="20" selected>Top 20</option>
+      <option value="30">Top 30</option></select>
+      <span class="hint">Logarithmic colour scale.</span></div>
+    <div style="overflow:auto"><table class="hm" id="tFlow"></table></div></div></div>
+
+  <div class="panel" id="p-trends">
+    <div class="card"><h2>Market turnover by session</h2>
+      <p class="note">Click a bar to jump to that day. Grey band marks the selected session.</p>
+      <div id="trMarket"></div></div>
+    <div class="grid2">
+      <div class="card"><h2>Broker net flow over time</h2>
+        <p class="note">Cumulative net tells you whether a position is being built or churned.</p>
+        <div class="toolbar"><select class="f" id="trBroker"></select>
+          <select class="f" id="trBrokerMode">
+            <option value="net">Daily net</option>
+            <option value="cum">Cumulative net</option>
+            <option value="gross">Daily gross</option></select></div>
+        <div id="trBrokerChart"></div></div>
+      <div class="card"><h2>Scrip over time</h2>
+        <p class="note">Turnover and VWAP across the archive.</p>
+        <div class="toolbar"><select class="f" id="trScrip"></select>
+          <select class="f" id="trScripMode">
+            <option value="turnover">Turnover</option>
+            <option value="vwap">VWAP</option></select></div>
+        <div id="trScripChart"></div></div>
+    </div>
+    <div class="card"><h2>Session table</h2>
+      <p class="note">Click any row to open that day.</p>
+      <div class="scroll"><table id="tDays"></table></div></div>
+  </div>
+
+  <footer id="foot"></footer>
+</div>
+
+<div id="drawer"><div class="dhead"><b id="dTitle"></b>
+  <button class="x" onclick="closeDrawer()">&times;</button></div>
+  <div class="dbody" id="dBody"></div></div>
+<div id="tip"></div><div id="load">Loading…</div>
+
+<script>
+const CR=1e7, LAKH=1e5;
+const EMBED_GZ=null;          // null on the site, gzip+base64 when offline
+let IDX=null, PANEL=null, DAY=null, DATE=null, RANGE=null, EMB=null;
+const CACHE=new Map();
+
+async function inflate(b64){
+  if(typeof DecompressionStream==='undefined')
+    throw new Error('This browser cannot decompress the embedded data. '+
+      'Open the online dashboard instead.');
+  const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+  const st=new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return JSON.parse(await new Response(st).text());
+}
+async function getDay(date){
+  if(!CACHE.has(date))
+    CACHE.set(date, EMB ? EMB.days[date]
+                        : await (await fetch(`data/day/${date}.json`)).json());
+  return CACHE.get(date);
+}
+
+function npr(x,pre){pre=pre===undefined?'Rs ':pre;
+ if(x===null||x===undefined||isNaN(x))return '—';
+ const s=x<0?'-':'',a=Math.abs(x);
+ if(a>=100*CR)return s+pre+(a/(100*CR)).toFixed(2)+' Ar';
+ if(a>=CR)return s+pre+(a/CR).toFixed(2)+' Cr';
+ if(a>=LAKH)return s+pre+(a/LAKH).toFixed(2)+' L';
+ return s+pre+Math.round(a).toLocaleString('en-IN');}
+const num=x=>Math.round(x).toLocaleString('en-IN');
+const pct=x=>x.toFixed(1)+'%';
+const bname=c=>(DAY&&DAY.names&&DAY.names[c])?c+' · '+DAY.names[c]:'B-'+c;
+const $=s=>document.querySelector(s);
+const rowsOf=(p,k)=>{const c=p.cols[k];return p[k].map(r=>{const o={};c.forEach((n,i)=>o[n]=r[i]);return o;});};
+
+/* ---------- boot ---------- */
+async function boot(){
+  if(EMBED_GZ){
+    $('#load').classList.add('on'); $('#load').textContent='Unpacking…';
+    try{ EMB=await inflate(EMBED_GZ); }
+    catch(e){ $('#load').textContent=e.message; return; }
+    IDX=EMB.index; PANEL=EMB.panel;
+    $('#load').classList.remove('on'); $('#load').textContent='Loading…';
+  } else {
+    IDX=await (await fetch('data/index.json')).json();
+  }
+  await secLoad();
+  await fundLoad();
+  const sel=$('#daySel');
+  sel.innerHTML=IDX.dates.slice().reverse().map(d=>`<option value="${d}">${d}</option>`).join('');
+  $('#dayDate').min=IDX.dates[0]; $('#dayDate').max=IDX.dates[IDX.dates.length-1];
+  buildBuckets();
+  const want=location.hash.slice(1);
+  if(want.includes('..')){
+    const [f,t]=want.split('..');
+    let i0=TL.buckets.findIndex(b=>b.to>=f), i1=TL.buckets.findIndex(b=>b.from>t);
+    TL.sel=[i0<0?0:i0,(i1<0?TL.buckets.length:i1)-1];
+    if(TL.sel[1]<TL.sel[0])TL.sel[1]=TL.sel[0];
+    renderTimeline(); await showRange(f,t);
+  } else {
+    const d=IDX.dates.includes(want)?want:IDX.dates[IDX.dates.length-1];
+    TL.level='day'; $('#tlLevel').value='day'; buildBuckets();
+    const i=TL.buckets.findIndex(b=>b.key===d);
+    TL.sel=[Math.max(0,i),Math.max(0,i)];
+    renderTimeline(); await show(d);
+  }
+  offlineNote();
+  $('#foot').innerHTML+='Broker net is a house-level proxy — the floor sheet does not '+
+   'disclose client identity, and offsetting client orders net out inside a broker code. '+
+   'Cross trades are typically negotiated transfers; screen them before reading flow. '+
+   'NEPSE publishes no trade timestamp, so "last" is the final contract in sequence order. '+
+   `Archive: ${IDX.dates.length} sessions, ${IDX.dates[0]} to ${IDX.dates[IDX.dates.length-1]}.`;
+}
+
+/* ---------- aggregate several sessions into one payload ---------- */
+function mergeDays(days, dates){
+  const C = days[0].cols;
+  const bi = {}; C.brokers.forEach((c,i)=>bi[c]=i);
+  const si = {}; C.scrips.forEach((c,i)=>si[c]=i);
+  const xi = {}; C.bscrip.forEach((c,i)=>xi[c]=i);
+  const pi = {}; C.pairs.forEach((c,i)=>pi[c]=i);
+  const ki = {}; C.blocks.forEach((c,i)=>ki[c]=i);
+
+  const B=new Map(), S=new Map(), X=new Map(), P=new Map();
+  let blocks=[], names={}, kpi={turnover:0,volume:0,trades:0,cross_amt:0,max_ticket:0};
+
+  days.forEach((d,di)=>{
+    Object.assign(names, d.names||{});
+    kpi.turnover+=d.kpi.turnover; kpi.volume+=d.kpi.volume; kpi.trades+=d.kpi.trades;
+    kpi.cross_amt+=d.kpi.cross_amt; kpi.max_ticket=Math.max(kpi.max_ticket,d.kpi.max_ticket);
+
+    d.brokers.forEach(r=>{const k=r[bi.code], o=B.get(k)||{code:k,buy:0,sell:0,trades:0,cross:0};
+      o.buy+=r[bi.buy]; o.sell+=r[bi.sell]; o.trades+=r[bi.trades];
+      o.cross+=r[bi.gross]*r[bi.crossPct]/200; B.set(k,o);});
+
+    d.scrips.forEach(r=>{const k=r[si.sym];
+      const o=S.get(k)||{sym:k,turnover:0,volume:0,trades:0,high:-1e18,low:1e18,last:0,
+                         nBuy:0,nSell:0};
+      o.turnover+=r[si.turnover]; o.volume+=r[si.volume]; o.trades+=r[si.trades];
+      o.high=Math.max(o.high,r[si.high]); o.low=Math.min(o.low,r[si.low]);
+      o.last=r[si.last];                              // days arrive in date order
+      o.nBuy=Math.max(o.nBuy,r[si.nBuy]); o.nSell=Math.max(o.nSell,r[si.nSell]);
+      S.set(k,o);});
+
+    d.bscrip.forEach(r=>{const k=r[xi.broker]+'|'+r[xi.sym];
+      const o=X.get(k)||{broker:r[xi.broker],sym:r[xi.sym],buy:0,sell:0};
+      o.buy+=r[xi.buy]; o.sell+=r[xi.sell]; X.set(k,o);});
+
+    d.pairs.forEach(r=>{const k=r[pi.buyer]+'|'+r[pi.seller];
+      const o=P.get(k)||{buyer:r[pi.buyer],seller:r[pi.seller],amount:0,trades:0};
+      o.amount+=r[pi.amount]; o.trades+=r[pi.trades]; P.set(k,o);});
+
+    d.blocks.forEach(r=>blocks.push([r[ki.sym],r[ki.buyer],r[ki.seller],r[ki.qty],
+      r[ki.rate],r[ki.amount],r[ki.cross],dates[di]]));
+  });
+
+  const brokers=[...B.values()].map(o=>{const gross=o.buy+o.sell;
+    return [o.code,o.buy,o.sell,gross,o.buy-o.sell,o.trades,
+      100*gross/(2*kpi.turnover), gross?100*2*o.cross/gross:0, gross/(o.trades||1)];})
+    .sort((a,b)=>b[3]-a[3]);
+
+  // buy-side HHI per scrip, from the aggregated broker x scrip cells
+  const buyBy=new Map();
+  X.forEach(o=>{const m=buyBy.get(o.sym)||new Map(); m.set(o.broker,(m.get(o.broker)||0)+o.buy);
+    buyBy.set(o.sym,m);});
+  const scrips=[...S.values()].map(o=>{
+    const vwap=o.volume?o.turnover/o.volume:0;
+    const m=buyBy.get(o.sym); let hhi=0;
+    if(m){const tot=[...m.values()].reduce((a,b)=>a+b,0);
+      if(tot>0)m.forEach(v=>hhi+=1e4*Math.pow(v/tot,2));}
+    return [o.sym,o.turnover,o.volume,o.trades,vwap,o.high,o.low,o.last,
+      vwap?100*(o.high-o.low)/vwap:0,o.nBuy,o.nSell,Math.round(hhi)];})
+    .sort((a,b)=>b[1]-a[1]);
+
+  const gs=brokers.map(r=>r[3]), tg=gs.reduce((a,b)=>a+b,0);
+  kpi.scrips=scrips.length; kpi.brokers=brokers.length;
+  kpi.avg_ticket=kpi.turnover/kpi.trades;
+  kpi.median_ticket=null;                       // medians do not aggregate
+  kpi.cross_pct=100*kpi.cross_amt/kpi.turnover;
+  kpi.top10_broker_pct=100*gs.slice(0,10).reduce((a,b)=>a+b,0)/(tg||1);
+  kpi.top10_scrip_pct=100*scrips.slice(0,10).reduce((a,r)=>a+r[1],0)/(kpi.turnover||1);
+  kpi.broker_hhi=gs.reduce((a,v)=>a+1e4*Math.pow(v/(tg||1),2),0);
+  kpi.scrip_hhi=scrips.reduce((a,r)=>a+1e4*Math.pow(r[1]/(kpi.turnover||1),2),0);
+
+  return {date:`${dates[0]} to ${dates[dates.length-1]}`, kpi, names, cols:{...C,
+      blocks:[...C.blocks,'day']},
+    brokers, scrips,
+    bscrip:[...X.values()].map(o=>[o.broker,o.sym,o.buy,o.sell]),
+    pairs:[...P.values()].map(o=>[o.buyer,o.seller,o.amount,o.trades])
+      .sort((a,b)=>b[2]-a[2]).slice(0,4000),
+    blocks: blocks.sort((a,b)=>b[5]-a[5]).slice(0,400)};
+}
+
+async function showRange(from,to){
+  const sel=IDX.dates.filter(d=>d>=from&&d<=to);
+  if(!sel.length){alert('No sessions between '+from+' and '+to);return;}
+  if(sel.length>80&&!confirm(`${sel.length} sessions will be downloaded `+
+     `(about ${Math.round(sel.length*0.2)} MB). Continue?`))return;
+  $('#load').classList.add('on');
+  try{
+    const days=[];
+    for(let i=0;i<sel.length;i++){
+      $('#load').textContent=`Loading ${i+1} of ${sel.length}…`;
+      days.push(await getDay(sel[i]));
+    }
+    DAY=mergeDays(days,sel); DATE=sel[sel.length-1]; RANGE=sel;
+    history.replaceState(null,'',`#${from}..${to}`);
+    $('#meta').textContent=`${sel.length} session${sel.length>1?'s':''} aggregated`;
+    $('#daySel').value=sel[sel.length-1];
+    renderAll();
+  }catch(e){alert('Could not load the range: '+e.message);}
+  finally{$('#load').classList.remove('on');$('#load').textContent='Loading…';}
+}
+
+async function show(date){
+  if(!IDX.dates.includes(date))return;
+  $('#load').classList.add('on');
+  try{
+    DAY=await getDay(date); DATE=date; RANGE=null;
+    $('#daySel').value=date; $('#dayDate').value=date;
+    history.replaceState(null,'','#'+date);
+    const i=IDX.dates.indexOf(date);
+    $('#prev').disabled=i<=0; $('#next').disabled=i>=IDX.dates.length-1;
+    $('#meta').textContent=`session ${i+1} of ${IDX.dates.length}`;
+    syncTimelineToDay(date);
+    renderAll();
+  }catch(e){ alert('Could not load '+date+': '+e.message); }
+  finally{ $('#load').classList.remove('on'); }
+}
+
+/* ---------- header ---------- */
+function renderKpis(){
+  if(RANGE){                                  // aggregated: use the merged kpi
+    const K=DAY.kpi;
+    $('#kpis').innerHTML=[['Turnover',npr(K.turnover)],['Trades',num(K.trades)],
+      ['Volume',num(K.volume)],['Sessions',RANGE.length],['Scrips',num(K.scrips)],
+      ['Brokers',num(K.brokers)],['Avg ticket',npr(K.avg_ticket)],
+      ['Cross',pct(K.cross_pct)]]
+      .map(([l,v])=>`<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join('');
+    return;
+  }
+  const k=IDX.kpi[DATE], i=IDX.dates.indexOf(DATE);
+  const p=i>0?IDX.kpi[IDX.dates[i-1]]:null;
+  const chg=(cur,prev)=>{if(!prev)return '';const d=100*(cur-prev)/prev;
+    return ` <i class="${d>=0?'up':'down'}">${d>=0?'+':''}${d.toFixed(1)}%</i>`;};
+  $('#kpis').innerHTML=[
+    ['Turnover',npr(k.turnover*LAKH),chg(k.turnover,p&&p.turnover)],
+    ['Trades',num(k.trades),chg(k.trades,p&&p.trades)],
+    ['Volume',num(k.volume),chg(k.volume,p&&p.volume)],
+    ['Scrips',num(k.scrips),''],['Brokers',num(k.brokers),''],
+    ['Avg ticket',npr(k.avgTicket),''],
+    ['Top-10 brokers',pct(k.top10Broker),''],['Cross',pct(k.crossPct),''],
+  ].map(([l,v,c])=>`<div class="kpi"><b>${v}${c}</b><span>${l}</span></div>`).join('');
+}
+
+/* ---------- shared bar list ---------- */
+function barList(el,items,opt){opt=opt||{};
+ const max=Math.max(1,...items.map(i=>Math.abs(i.v)),...items.map(i=>Math.abs(i.v2||0)));
+ el.innerHTML=items.map(i=>{let inner;
+  if(opt.diverging||opt.butterfly){
+    const neg=opt.butterfly?Math.abs(i.v2):Math.abs(Math.min(i.v,0));
+    const pos=opt.butterfly?i.v:Math.max(i.v,0);
+    inner=`<div class="mid" style="left:50%"></div>
+     <div class="fill" style="right:50%;width:${50*neg/max}%;background:var(--sell)"></div>
+     <div class="fill" style="left:50%;width:${50*pos/max}%;background:var(--buy)"></div>`;
+  } else inner=`<div class="fill" style="left:0;width:${100*i.v/max}%;background:${opt.color||'var(--navy)'}"></div>`;
+  return `<div class="bar-row"${i.click?` style="cursor:pointer" onclick="${i.click}"`:''}>
+   <div class="lbl">${i.k}</div><div class="track">${inner}</div>
+   <div class="val">${i.t}</div></div>`;}).join('')||'<div class="empty">No data.</div>';}
+
+/* ---------- sortable table ---------- */
+function makeTable(elId,cols,getData,onRow){
+  const el=$('#'+elId); let sk=cols.find(c=>c.sort).k, sd=-1;
+  function draw(){
+    const data=getData().slice().sort((a,b)=>{const x=a[sk],y=b[sk];
+      return (typeof x==='string'?x.localeCompare(y):x-y)*sd;});
+    el.innerHTML='<thead><tr>'+cols.map(c=>`<th data-k="${c.k}" class="${c.num?'num ':''}${c.k===sk?(sd<0?'desc':'asc'):''}">${c.h}</th>`).join('')+
+     '</tr></thead><tbody>'+data.map(r=>`<tr${onRow?` class="clickable" data-id="${r[cols[0].k]}"`:''}>`+
+      cols.map(c=>`<td class="${c.num?'num ':''}${c.cls?c.cls(r):''}">${c.f(r)}</td>`).join('')+'</tr>').join('')+'</tbody>';
+    el.querySelectorAll('th').forEach(th=>th.onclick=()=>{const k=th.dataset.k;
+      if(k===sk)sd=-sd;else{sk=k;sd=(typeof getData()[0][k]==='string')?1:-1;}draw();});
+    if(onRow)el.querySelectorAll('tbody tr').forEach(tr=>tr.onclick=()=>onRow(tr.dataset.id));
+    return data.length;}
+  return draw;}
+
+/* ---------- per-day rendering ---------- */
+let BROKERS=[],SCRIPS=[],BSCRIP=[],PAIRS=[],BLOCKS=[],BR_BY={},SC_BY={};
+let drawBrokers,drawScrips,drawBlocks;
+
+function renderAll(){
+  BROKERS=rowsOf(DAY,'brokers'); SCRIPS=rowsOf(DAY,'scrips');
+  SCRIPS.forEach(s=>{s.sector=secGroupAll(s.sym);
+    const _f=(typeof fundRow==='function')?fundRow(s):null;
+    s.pe=_f?_f.peLive:null; s.pb=_f?_f.pbvLive:null;});
+  secFillScripFilter();
+  BSCRIP=rowsOf(DAY,'bscrip'); PAIRS=rowsOf(DAY,'pairs'); BLOCKS=rowsOf(DAY,'blocks');
+  BR_BY={};BROKERS.forEach(b=>BR_BY[b.code]=b);
+  SC_BY={};SCRIPS.forEach(s=>SC_BY[s.sym]=s);
+  renderKpis();
+
+  barList($('#ovScrips'),SCRIPS.slice(0,15).map(s=>({k:s.sym,v:s.turnover,
+    t:npr(s.turnover),click:`openScrip('${s.sym}')`})));
+  barList($('#ovBrokers'),BROKERS.slice(0,15).map(b=>({k:bname(b.code),v:b.buy,v2:b.sell,
+    t:npr(b.gross),click:`openBroker(${b.code})`})),{butterfly:1});
+  const ns=BROKERS.slice().sort((a,b)=>b.net-a.net);
+  barList($('#ovNet'),ns.slice(0,8).concat(ns.slice(-8)).map(b=>({k:bname(b.code),v:b.net,
+    t:npr(b.net),click:`openBroker(${b.code})`})),{diverging:1});
+  const K=DAY.kpi, big=BLOCKS.filter(b=>b.amount>=CR).length;
+  $('#ovStats').innerHTML='<div class="stat">'+[['Broker HHI',num(K.broker_hhi)],
+    ['Scrip HHI',num(K.scrip_hhi)],['Median ticket',K.median_ticket===null?'—':npr(K.median_ticket)],
+    ['Largest ticket',npr(K.max_ticket)],['Cross trades',npr(K.cross_amt)],
+    ['Tickets ≥ 1 Cr',big]].map(([l,v])=>`<div>${l}<b>${v}</b></div>`).join('')+'</div>'+
+    '<h3 class="sec">Most concentrated buying</h3><div id="hhiBars"></div>';
+  barList($('#hhiBars'),SCRIPS.filter(s=>s.turnover>2e6).sort((a,b)=>b.hhi-a.hhi)
+    .slice(0,8).map(s=>({k:s.sym,v:s.hhi,t:num(s.hhi)+' · '+npr(s.turnover),
+    click:`openScrip('${s.sym}')`})),{color:'var(--gold)'});
+
+  drawBrokers=makeTable('tBroker',[
+    {k:'code',h:'Broker',f:r=>bname(r.code)},
+    {k:'buy',h:'Buy',num:1,f:r=>npr(r.buy,'')},
+    {k:'sell',h:'Sell',num:1,f:r=>npr(r.sell,'')},
+    {k:'gross',h:'Gross',num:1,sort:1,f:r=>npr(r.gross,'')},
+    {k:'net',h:'Net',num:1,f:r=>npr(r.net,''),cls:r=>r.net>=0?'pos':'neg'},
+    {k:'share',h:'Share %',num:1,f:r=>r.share.toFixed(2)},
+    {k:'trades',h:'Trades',num:1,f:r=>num(r.trades)},
+    {k:'crossPct',h:'Cross %',num:1,f:r=>r.crossPct.toFixed(1)}],
+    ()=>{const q=$('#qBroker').value.trim().toLowerCase(),s=$('#fBrokerSide').value;
+      return BROKERS.filter(b=>(!q||bname(b.code).toLowerCase().includes(q))&&
+        (!s||(s==='buy'?b.net>0:b.net<0)));},c=>openBroker(+c));
+  drawScrips=makeTable('tScrip',[
+    {k:'sym',h:'Scrip',f:r=>r.sym},
+    {k:'sector',h:'Sector',f:r=>r.sector||'—'},
+    {k:'pe',h:'P/E',num:1,f:r=>r.pe==null?'—':r.pe.toFixed(1)},
+    {k:'pb',h:'P/B',num:1,f:r=>r.pb==null?'—':r.pb.toFixed(2)},
+    {k:'turnover',h:'Turnover',num:1,sort:1,f:r=>npr(r.turnover,'')},
+    {k:'volume',h:'Volume',num:1,f:r=>num(r.volume)},
+    {k:'trades',h:'Trades',num:1,f:r=>num(r.trades)},
+    {k:'vwap',h:'VWAP',num:1,f:r=>r.vwap.toFixed(1)},
+    {k:'low',h:'Low',num:1,f:r=>r.low.toFixed(1)},
+    {k:'high',h:'High',num:1,f:r=>r.high.toFixed(1)},
+    {k:'rangePct',h:'Range %',num:1,f:r=>r.rangePct.toFixed(1)},
+    {k:'hhi',h:'Buy HHI',num:1,f:r=>num(r.hhi)}],
+    ()=>{const q=$('#qScrip').value.trim().toUpperCase(),g=$('#fScripSector').value;
+      return SCRIPS.filter(s=>(!q||s.sym.includes(q))&&(!g||s.sector===g));},
+    s=>openScrip(s));
+  const blockCols=[
+    {k:'sym',h:'Scrip',f:r=>r.sym},{k:'buyer',h:'Buyer',f:r=>bname(r.buyer)},
+    {k:'seller',h:'Seller',f:r=>bname(r.seller)},
+    {k:'qty',h:'Qty',num:1,f:r=>num(r.qty)},
+    {k:'rate',h:'Rate',num:1,f:r=>r.rate.toFixed(1)},
+    {k:'amount',h:'Value',num:1,sort:1,f:r=>npr(r.amount,'')},
+    {k:'cross',h:'Type',f:r=>r.cross?'<span class="tag cross">Cross</span>':
+      '<span class="tag inter">Inter-broker</span>'}];
+  if(RANGE)blockCols.splice(1,0,{k:'day',h:'Day',f:r=>r.day});
+  drawBlocks=makeTable('tBlock',blockCols,
+    ()=>{const q=$('#qBlock').value.trim().toLowerCase(),t=$('#fBlockType').value;
+      return BLOCKS.filter(b=>(!q||b.sym.toLowerCase().includes(q)||String(b.buyer)===q||
+        String(b.seller)===q)&&(t===''||String(b.cross)===t));});
+  refreshTables(); drawFlow();
+  if($('#p-trends').classList.contains('on'))renderTrends();
+  if($('#p-sectors').classList.contains('on'))renderSectors();
+  if($('#p-fund').classList.contains('on'))renderFund();
+}
+function refreshTables(){
+  $('#cBroker').textContent=drawBrokers()+' brokers';
+  $('#cScrip').textContent=drawScrips()+' scrips';
+  $('#cBlock').textContent=drawBlocks()+' contracts';}
+
+/* ---------- flow matrix ---------- */
+const tip=$('#tip');
+function showTip(e,h){tip.innerHTML=h;tip.style.opacity=1;
+ tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY+14)+'px';}
+function hideTip(){tip.style.opacity=0;}
+function drawFlow(){
+  const n=+$('#fFlowN').value, top=BROKERS.slice(0,n).map(b=>b.code), idx={};
+  top.forEach((c,i)=>idx[c]=i);
+  const m=top.map(()=>top.map(()=>0));
+  PAIRS.forEach(p=>{if(idx[p.buyer]!==undefined&&idx[p.seller]!==undefined)
+    m[idx[p.seller]][idx[p.buyer]]+=p.amount;});
+  const vals=m.flat().filter(v=>v>0);
+  if(!vals.length){$('#tFlow').innerHTML='';return;}
+  const lo=Math.log(Math.max(Math.min(...vals),1e4)),hi=Math.log(Math.max(...vals));
+  const shade=v=>{if(!v)return '#fff';
+    const t=Math.min(1,Math.max(0,(Math.log(v)-lo)/(hi-lo||1)));
+    return `rgb(${Math.round(255-176*t)},${Math.round(255-218*t)},${Math.round(255-186*t)})`;};
+  let h='<thead><tr><th></th>'+top.map(c=>`<th class="v">${bname(c)}</th>`).join('')+'</tr></thead><tbody>';
+  top.forEach((rc,i)=>{h+=`<tr><th>${bname(rc)}</th>`;
+    top.forEach((cc,j)=>{h+=`<td style="background:${shade(m[i][j])}" data-v="${m[i][j]}" data-s="${rc}" data-b="${cc}"></td>`;});
+    h+='</tr>';});
+  const el=$('#tFlow'); el.innerHTML=h+'</tbody>';
+  el.querySelectorAll('td[data-v]').forEach(td=>{
+    td.onmousemove=e=>showTip(e,`<b>${bname(td.dataset.s)}</b> sold ${npr(+td.dataset.v)}<br>to <b>${bname(td.dataset.b)}</b>`+
+      (td.dataset.s===td.dataset.b?'<br><i>cross trade</i>':''));
+    td.onmouseleave=hideTip; td.onclick=()=>{hideTip();openBroker(+td.dataset.s);};});}
+
+/* ---------- drawer ---------- */
+const drawer=$('#drawer');
+function closeDrawer(){drawer.classList.remove('on');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer();});
+function openBroker(code){
+  const b=BR_BY[code]; if(!b)return;
+  $('#dTitle').textContent=bname(code);
+  const mine=BSCRIP.filter(r=>r.broker===code).map(r=>({sym:r.sym,net:r.buy-r.sell}));
+  const byNet=mine.slice().sort((x,y)=>y.net-x.net);
+  const from=PAIRS.filter(p=>p.buyer===code).sort((x,y)=>y.amount-x.amount).slice(0,8);
+  const to=PAIRS.filter(p=>p.seller===code).sort((x,y)=>y.amount-x.amount).slice(0,8);
+  $('#dBody').innerHTML='<div class="stat">'+[['Buy',npr(b.buy)],['Sell',npr(b.sell)],
+    ['Net',npr(b.net)],['Gross',npr(b.gross)],['Share',b.share.toFixed(2)+'%'],
+    ['Trades',num(b.trades)],['Cross',b.crossPct.toFixed(1)+'%']]
+    .map(([l,v])=>`<div>${l}<b>${v}</b></div>`).join('')+'</div>'+
+    `<h3 class="sec">Net position by scrip</h3><div id="dNet"></div>
+     <h3 class="sec">Bought from</h3><div id="dFrom"></div>
+     <h3 class="sec">Sold to</h3><div id="dTo"></div>
+     <h3 class="sec">This broker across the archive</h3><div id="dTrend"></div>`;
+  barList($('#dNet'),byNet.slice(0,7).concat(byNet.slice(-7))
+    .filter((v,i,a)=>a.indexOf(v)===i).map(r=>({k:r.sym,v:r.net,t:npr(r.net,''),
+    click:`openScrip('${r.sym}')`})),{diverging:1});
+  barList($('#dFrom'),from.map(p=>({k:bname(p.seller),v:p.amount,
+    t:npr(p.amount,'')+' · '+p.trades,click:`openBroker(${p.seller})`})),{color:'var(--buy)'});
+  barList($('#dTo'),to.map(p=>({k:bname(p.buyer),v:p.amount,
+    t:npr(p.amount,'')+' · '+p.trades,click:`openBroker(${p.buyer})`})),{color:'var(--sell)'});
+  ensurePanel().then(()=>{const s=PANEL.brokers[String(code)];
+    if(s)$('#dTrend').innerHTML=lineChart(PANEL.dates,s[0],{zero:1,unit:'L',
+      label:'daily net'});});
+  drawer.classList.add('on'); drawer.scrollTop=0;}
+function openScrip(sym){
+  const s=SC_BY[sym]; if(!s)return;
+  $('#dTitle').textContent=sym;
+  const mine=BSCRIP.filter(r=>r.sym===sym).map(r=>({code:r.broker,buy:r.buy,sell:r.sell,
+    net:r.buy-r.sell,gross:r.buy+r.sell})).sort((x,y)=>y.gross-x.gross);
+  $('#dBody').innerHTML='<div class="stat">'+[['Turnover',npr(s.turnover)],
+    ['Volume',num(s.volume)],['Trades',num(s.trades)],['VWAP',s.vwap.toFixed(1)],
+    ['Low–High',s.low.toFixed(1)+' – '+s.high.toFixed(1)],['Range',s.rangePct.toFixed(1)+'%'],
+    ['Buy HHI',num(s.hhi)]].map(([l,v])=>`<div>${l}<b>${v}</b></div>`).join('')+'</div>'+
+    `<h3 class="sec">Broker participation</h3><div id="dPart"></div>
+     <h3 class="sec">Net by broker</h3><div id="dSNet"></div>
+     <h3 class="sec">This scrip across the archive</h3><div id="dTrend"></div>`;
+  barList($('#dPart'),mine.slice(0,14).map(r=>({k:bname(r.code),v:r.buy,v2:r.sell,
+    t:npr(r.gross,''),click:`openBroker(${r.code})`})),{butterfly:1});
+  const bn=mine.slice().sort((x,y)=>y.net-x.net);
+  barList($('#dSNet'),bn.slice(0,6).concat(bn.slice(-6)).filter((v,i,a)=>a.indexOf(v)===i)
+    .map(r=>({k:bname(r.code),v:r.net,t:npr(r.net,''),click:`openBroker(${r.code})`})),{diverging:1});
+  ensurePanel().then(()=>{const ser=PANEL.scrips[sym];
+    if(ser)$('#dTrend').innerHTML=lineChart(PANEL.dates,ser[0],{unit:'L',label:'turnover'});});
+  drawer.classList.add('on'); drawer.scrollTop=0;}
+
+/* ---------- charts ---------- */
+function lineChart(labels,vals,o){
+  o=o||{}; const W=680,H=200,P={l:46,r:8,t:10,b:22};
+  const pts=vals.map((v,i)=>[i,v]).filter(p=>p[1]!==null&&p[1]!==undefined);
+  if(!pts.length)return '<div class="empty">No data.</div>';
+  let mn=Math.min(...pts.map(p=>p[1])), mx=Math.max(...pts.map(p=>p[1]));
+  if(o.zero){mn=Math.min(mn,0);mx=Math.max(mx,0);} if(mn===mx){mn-=1;mx+=1;}
+  const x=i=>P.l+(W-P.l-P.r)*(labels.length<2?0.5:i/(labels.length-1));
+  const y=v=>P.t+(H-P.t-P.b)*(1-(v-mn)/(mx-mn));
+  const d=pts.map((p,k)=>(k?'L':'M')+x(p[0]).toFixed(1)+' '+y(p[1]).toFixed(1)).join(' ');
+  const ticks=[mn,(mn+mx)/2,mx].map(v=>
+    `<line class="gl" x1="${P.l}" y1="${y(v)}" x2="${W-P.r}" y2="${y(v)}"/>
+     <text x="${P.l-5}" y="${y(v)+3}" text-anchor="end">${(v>=1000?(v/100).toFixed(0)+'Cr':v.toFixed(0)+(o.unit||''))}</text>`).join('');
+  const zero=(mn<0&&mx>0)?`<line class="ax" x1="${P.l}" y1="${y(0)}" x2="${W-P.r}" y2="${y(0)}"/>`:'';
+  const step=Math.max(1,Math.ceil(labels.length/6));
+  const xl=labels.map((l,i)=>i%step?'':`<text x="${x(i)}" y="${H-6}" text-anchor="middle">${l.slice(5)}</text>`).join('');
+  const marker=o.mark!==undefined&&o.mark>=0?
+    `<line class="ax" x1="${x(o.mark)}" y1="${P.t}" x2="${x(o.mark)}" y2="${H-P.b}" stroke="var(--gold)" stroke-dasharray="3 3"/>`:'';
+  const area=o.zero?'':`<path d="${d} L ${x(pts[pts.length-1][0])} ${y(mn)} L ${x(pts[0][0])} ${y(mn)} Z" fill="var(--navy)" opacity=".07"/>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${ticks}${zero}${marker}${area}
+   <path d="${d}" fill="none" stroke="var(--navy)" stroke-width="2"/>${xl}</svg>`;}
+
+function barChart(labels,vals,onClick,markIdx){
+  const W=1180,H=210,P={l:52,r:8,t:10,b:24};
+  const mx=Math.max(...vals,1), bw=(W-P.l-P.r)/vals.length;
+  const y=v=>P.t+(H-P.t-P.b)*(1-v/mx);
+  const bars=vals.map((v,i)=>`<rect x="${(P.l+i*bw+bw*.12).toFixed(1)}" y="${y(v).toFixed(1)}"
+    width="${(bw*.76).toFixed(1)}" height="${(H-P.b-y(v)).toFixed(1)}"
+    fill="${i===markIdx?'var(--gold)':'var(--navy)'}" style="cursor:pointer"
+    onclick="${onClick}('${labels[i]}')"><title>${labels[i]} — ${npr(vals[i]*LAKH)}</title></rect>`).join('');
+  const ticks=[0,mx/2,mx].map(v=>`<line class="gl" x1="${P.l}" y1="${y(v)}" x2="${W-P.r}" y2="${y(v)}"/>
+    <text x="${P.l-5}" y="${y(v)+3}" text-anchor="end">${(v/100).toFixed(0)} Cr</text>`).join('');
+  const step=Math.max(1,Math.ceil(labels.length/12));
+  const xl=labels.map((l,i)=>i%step?'':`<text x="${(P.l+i*bw+bw/2).toFixed(1)}" y="${H-6}" text-anchor="middle">${l.slice(5)}</text>`).join('');
+  return `<svg class="chart" style="height:230px" viewBox="0 0 ${W} ${H}">${ticks}${bars}${xl}</svg>`;}
+
+/* ---------- trends ---------- */
+async function ensurePanel(){
+  if(!PANEL)PANEL=await (await fetch('data/panel.json')).json();
+  return PANEL;}
+function offlineNote(){
+  if(!EMB)return;
+  $('#foot').insertAdjacentHTML('afterbegin',
+    `<div style="background:#FBF1D2;color:#7A5F02;padding:7px 10px;border-radius:4px;
+      margin-bottom:10px"><b>Offline copy</b> — the ${IDX.dates.length} most recent
+      sessions are embedded in this file. The full archive is online.</div>`);}
+async function renderTrends(){
+  await ensurePanel();
+  const d=IDX.dates, mark=d.indexOf(DATE);
+  $('#trMarket').innerHTML=barChart(d,d.map(x=>IDX.kpi[x].turnover),'show',mark);
+  if(RANGE)$('#trMarket').insertAdjacentHTML('afterbegin',
+    `<div class="hint" style="margin-bottom:6px">Aggregating ${RANGE.length} `+
+    `session(s): ${RANGE[0]} to ${RANGE[RANGE.length-1]}.</div>`);
+
+  const bsel=$('#trBroker');
+  if(!bsel.options.length){
+    const order=Object.keys(PANEL.brokers).sort((a,b)=>
+      (PANEL.brokers[b][1].reduce((s,v)=>s+(v||0),0))-(PANEL.brokers[a][1].reduce((s,v)=>s+(v||0),0)));
+    bsel.innerHTML=order.map(c=>`<option value="${c}">${bname(c)}</option>`).join('');
+    const ssel=$('#trScrip');
+    const sorder=Object.keys(PANEL.scrips).sort((a,b)=>
+      (PANEL.scrips[b][0].reduce((s,v)=>s+(v||0),0))-(PANEL.scrips[a][0].reduce((s,v)=>s+(v||0),0)));
+    ssel.innerHTML=sorder.map(s=>`<option value="${s}">${s}</option>`).join('');
+  }
+  drawBrokerTrend(); drawScripTrend();}
+function drawBrokerTrend(){
+  const s=PANEL.brokers[$('#trBroker').value]; if(!s)return;
+  const m=$('#trBrokerMode').value;
+  let v=m==='gross'?s[1]:s[0];
+  if(m==='cum'){let t=0;v=s[0].map(x=>{t+=(x||0);return t;});}
+  $('#trBrokerChart').innerHTML=lineChart(PANEL.dates,v,
+    {zero:m!=='gross',unit:'L',mark:PANEL.dates.indexOf(DATE)});}
+function drawScripTrend(){
+  const s=PANEL.scrips[$('#trScrip').value]; if(!s)return;
+  const m=$('#trScripMode').value;
+  $('#trScripChart').innerHTML=lineChart(PANEL.dates,m==='vwap'?s[1]:s[0],
+    {unit:m==='vwap'?'':'L',mark:PANEL.dates.indexOf(DATE)});}
+
+
+/* ---------- sectors ---------- */
+let SEC=null, SECPAN=null, SECRET=null;
+const SECOPT={basis:'equity',metric:'turnover'};
+const SECHIDE=new Set();
+const SECPAL=['#0B2545','#C9A227','#1B7F4C','#B02A2A','#3D6EA8','#6B4C9A',
+  '#2F8F9D','#C2703D','#4F6D2E','#9A3B5C','#7A5F02','#5E8C6A','#8A6BB1','#A0522D'];
+const MKT='__MKT__';
+const PROM='Promoter Share';
+const MAXRET=0.10;   /* NEPSE daily circuit — past this it is a corporate action */
+const MINTL=1.0;     /* lakh; a name has to trade this much on both days to count */
+
+async function secLoad(){
+  try{
+    SEC = EMB ? (EMB.sectors||null)
+              : await (await fetch('data/sectors.json')).json();
+  }catch(e){ SEC=null; }
+  if(SEC&&!SEC.sym)SEC=null;
+  return SEC;
+}
+function secInfo(sym){
+  if(!SEC)return null;
+  const r=SEC.sym[sym]; if(!r)return null;
+  return {sector:SEC.sectors[r[0]],group:SEC.groups[r[1]],
+          inst:SEC.instruments[r[2]],status:SEC.statuses[r[3]],
+          name:(SEC.name||{})[sym]||''};
+}
+/* basis-independent, for the Scrips tab column */
+function secGroupAll(sym){const i=secInfo(sym);return i?i.group:'Unmapped';}
+function secIsProm(sym){const i=secInfo(sym);return !!i&&i.inst===PROM;}
+/* Does this instrument survive the current basis?
+   equity      ordinary shares only
+   equityprom  ordinary plus the promoter register — same sector either way,
+               so NABIL and NABILP both land in Commercial Banks
+   all         debentures, funds and preference shares as well, each in its own
+               bucket because those are separate asset classes wearing the
+               issuer's sector as a label */
+function secKeeps(inst){
+  if(SECOPT.basis==='all')return true;
+  if(SECOPT.basis==='equityprom')return inst==='Equity'||inst===PROM;
+  return inst==='Equity';
+}
+/* null means "excluded by the current basis" */
+function secOf(sym){
+  const i=secInfo(sym);
+  if(!i)return 'Unmapped';
+  return secKeeps(i.inst)?i.group:null;
+}
+function secColor(g){
+  if(g==='Unmapped')return '#8A94A6';
+  if(g===MKT)return '#1C2331';
+  const i=SEC?SEC.groups.indexOf(g):-1;
+  return SECPAL[(i<0?0:i)%SECPAL.length];
+}
+function secListedCounts(){
+  const c={};
+  if(!SEC)return c;
+  Object.keys(SEC.sym).forEach(s=>{
+    const r=SEC.sym[s];
+    if(SEC.statuses[r[3]]!=='Active')return;
+    if(!secKeeps(SEC.instruments[r[2]]))return;
+    const g=SEC.groups[r[1]]; c[g]=(c[g]||0)+1;});
+  return c;
+}
+
+/* ---------- selection-level aggregate ---------- */
+function secAgg(){
+  const m=new Map();
+  SCRIPS.forEach(s=>{
+    const g=secOf(s.sym); if(g===null)return;
+    let o=m.get(g);
+    if(!o){o={g:g,turnover:0,volume:0,trades:0,n:0,above:0,rng:0,tops:[],
+              prom:0,nProm:0};
+           m.set(g,o);}
+    o.turnover+=s.turnover; o.volume+=s.volume; o.trades+=s.trades; o.n++;
+    if(s.vwap>0&&s.last>=s.vwap)o.above++;
+    /* Tracked even when promoter shares are excluded, so the column can say 0
+       rather than go missing. A sector that is a third promoter turnover is a
+       sector whose "flow" is mostly register transfers, and that should be
+       visible on the face of the table. */
+    if(secIsProm(s.sym)){o.prom+=s.turnover; o.nProm++;}
+    o.rng+=s.rangePct; o.tops.push([s.sym,s.turnover]);
+  });
+  const tot=[...m.values()].reduce((a,o)=>a+o.turnover,0)||1;
+  const listed=secListedCounts();
+  const key=SECOPT.metric;
+  return [...m.values()].map(o=>{
+    o.tops.sort((a,b)=>b[1]-a[1]);
+    o.top3=100*o.tops.slice(0,3).reduce((a,r)=>a+r[1],0)/(o.turnover||1);
+    o.share=100*o.turnover/tot;
+    o.listed=listed[o.g]||0;
+    o.part=o.listed?100*o.n/o.listed:0;
+    o.breadth=o.n?100*o.above/o.n:0;
+    o.avgTicket=o.trades?o.turnover/o.trades:0;
+    o.rangeAvg=o.n?o.rng/o.n:0;
+    o.promPct=o.turnover?100*o.prom/o.turnover:0;
+    return o;}).sort((a,b)=>b[key]-a[key]);
+}
+function secUnmapped(){
+  return SCRIPS.filter(s=>!secInfo(s.sym));
+}
+
+/* ---------- archive-wide series off panel.json ---------- */
+function secPanel(){
+  if(SECPAN&&SECPAN.basis===SECOPT.basis)return SECPAN;
+  const D=PANEL.dates, byG={};
+  Object.keys(PANEL.scrips).forEach(sym=>{
+    const g=secOf(sym); if(g===null)return;
+    const t=PANEL.scrips[sym][0];
+    let a=byG[g]; if(!a)a=byG[g]=new Array(D.length).fill(0);
+    for(let j=0;j<D.length;j++) if(t[j]!=null) a[j]+=t[j];
+  });
+  SECPAN={basis:SECOPT.basis,dates:D,byG:byG};
+  return SECPAN;
+}
+
+/* Chain-linked, turnover-weighted VWAP return index. See the module docstring
+   for why moves past the circuit are dropped rather than winsorised. */
+function secReturns(){
+  if(SECRET&&SECRET.basis===SECOPT.basis)return SECRET;
+  const D=PANEL.dates, n=D.length, acc={}, dropped=new Array(n).fill(0);
+  function add(g,j,w,r){
+    let a=acc[g];
+    if(!a)a=acc[g]={w:new Array(n).fill(0),wr:new Array(n).fill(0),
+                    c:new Array(n).fill(0)};
+    a.w[j]+=w; a.wr[j]+=w*r; a.c[j]++;
+  }
+  Object.keys(PANEL.scrips).forEach(sym=>{
+    const g=secOf(sym); if(g===null)return;
+    const t=PANEL.scrips[sym][0], v=PANEL.scrips[sym][1];
+    for(let j=1;j<n;j++){
+      const v0=v[j-1], v1=v[j], t0=t[j-1], t1=t[j];
+      if(v0==null||v1==null||v0<=0||v1<=0)continue;
+      if(t0==null||t1==null||t0<MINTL||t1<MINTL)continue;
+      const r=v1/v0-1;
+      if(Math.abs(r)>MAXRET){dropped[j]++;continue;}
+      add(g,j,t1,r); add(MKT,j,t1,r);
+    }
+  });
+  const out={};
+  Object.keys(acc).forEach(g=>{
+    const a=acc[g], ret=new Array(n).fill(null), idx=new Array(n).fill(100);
+    let lvl=100;
+    for(let j=1;j<n;j++){
+      if(a.c[j]>0&&a.w[j]>0){ret[j]=a.wr[j]/a.w[j]; lvl*=(1+ret[j]);}
+      idx[j]=lvl;
+    }
+    out[g]={ret:ret,idx:idx,c:a.c};
+  });
+  SECRET={basis:SECOPT.basis,dates:D,g:out,dropped:dropped};
+  return SECRET;
+}
+function secRet(g,end,k){
+  const R=secReturns().g[g]; if(!R)return null;
+  const a=Math.max(0,end-k);
+  if(a===end||!R.idx[a])return null;
+  return R.idx[end]/R.idx[a]-1;
+}
+
+/* Turnover share now against the preceding window of the same length. */
+function secDrift(){
+  const P=secPanel(), D=P.dates;
+  const sel=RANGE?RANGE:[DATE];
+  const i0=D.indexOf(sel[0]), i1=D.indexOf(sel[sel.length-1]);
+  if(i0<0||i1<0)return null;
+  const k=i1-i0+1, p1=i0-1, p0=Math.max(0,i0-k);
+  if(p1<p0)return null;
+  const gs=Object.keys(P.byG);
+  const sum=(g,a,b)=>{const arr=P.byG[g];let s=0;for(let j=a;j<=b;j++)s+=arr[j]||0;
+                      return s;};
+  const cur={},prv={};
+  let ct=0,pt=0;
+  gs.forEach(g=>{cur[g]=sum(g,i0,i1);prv[g]=sum(g,p0,p1);ct+=cur[g];pt+=prv[g];});
+  if(!ct||!pt)return null;
+  const out={};
+  gs.forEach(g=>{out[g]=100*cur[g]/ct-100*prv[g]/pt;});
+  out.__window__=p1-p0+1;
+  return out;
+}
+
+/* ---------- charts ---------- */
+function multiLine(labels,series,o){
+  o=o||{};
+  const W=1180,H=250,P={l:54,r:10,t:10,b:24};
+  const vis=series.filter(s=>!SECHIDE.has(s.name));
+  const all=[];
+  vis.forEach(s=>{for(let i=0;i<s.vals.length;i++)
+    if(s.vals[i]!=null)all.push(s.vals[i]);});
+  if(!all.length)return '<div class="empty">Not enough overlapping sessions.</div>';
+  let mn=all[0],mx=all[0];
+  for(let i=1;i<all.length;i++){if(all[i]<mn)mn=all[i];if(all[i]>mx)mx=all[i];}
+  if(o.base!=null){mn=Math.min(mn,o.base);mx=Math.max(mx,o.base);}
+  if(mn===mx){mn-=1;mx+=1;}
+  const pad=(mx-mn)*0.06; mn-=pad; mx+=pad;
+  const x=i=>P.l+(W-P.l-P.r)*(labels.length<2?0.5:i/(labels.length-1));
+  const y=v=>P.t+(H-P.t-P.b)*(1-(v-mn)/(mx-mn));
+  const ticks=[mn,(mn+mx)/2,mx].map(v=>
+    '<line class="gl" x1="'+P.l+'" y1="'+y(v).toFixed(1)+'" x2="'+(W-P.r)+
+    '" y2="'+y(v).toFixed(1)+'"/><text x="'+(P.l-5)+'" y="'+(y(v)+3).toFixed(1)+
+    '" text-anchor="end">'+v.toFixed(1)+'</text>').join('');
+  const base=o.base!=null?'<line class="ax" x1="'+P.l+'" y1="'+y(o.base).toFixed(1)+
+    '" x2="'+(W-P.r)+'" y2="'+y(o.base).toFixed(1)+'" stroke-dasharray="3 3"/>':'';
+  const paths=vis.map(s=>{
+    let d='',open=false;
+    for(let i=0;i<s.vals.length;i++){
+      const v=s.vals[i];
+      if(v==null){open=false;continue;}
+      d+=(open?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)+' ';
+      open=true;
+    }
+    return d?'<path d="'+d+'" fill="none" stroke="'+s.color+'" stroke-width="'+
+      (s.name===MKT?'2.4':'1.8')+'"'+(s.name===MKT?' stroke-dasharray="5 3"':'')+
+      '><title>'+(s.name===MKT?'Market':s.name)+'</title></path>':'';
+  }).join('');
+  const step=Math.max(1,Math.ceil(labels.length/10));
+  const xl=labels.map((l,i)=>i%step?'':'<text x="'+x(i).toFixed(1)+'" y="'+(H-6)+
+    '" text-anchor="middle">'+l.slice(5)+'</text>').join('');
+  const mk=o.mark!=null&&o.mark>=0?'<line class="ax" x1="'+x(o.mark).toFixed(1)+
+    '" y1="'+P.t+'" x2="'+x(o.mark).toFixed(1)+'" y2="'+(H-P.b)+
+    '" stroke="var(--gold)" stroke-dasharray="3 3"/>':'';
+  return '<svg class="chart tall" viewBox="0 0 '+W+' '+H+'">'+ticks+base+mk+
+         paths+xl+'</svg>';
+}
+
+function stackArea(labels,series,markIdx){
+  const W=1180,H=210,P={l:34,r:8,t:8,b:22};
+  const n=labels.length;
+  series=series.filter(s=>s&&s.vals&&s.vals.length);
+  if(!n||!series.length)return '<div class="empty">No data.</div>';
+  const tot=new Array(n).fill(0);
+  series.forEach(s=>{for(let j=0;j<n;j++)tot[j]+=s.vals[j]||0;});
+  const x=j=>P.l+(W-P.l-P.r)*(n<2?0.5:j/(n-1));
+  const y=f=>P.t+(H-P.t-P.b)*(1-f);
+  const base=new Array(n).fill(0);
+  const bands=series.map(s=>{
+    const lo=base.slice();
+    for(let j=0;j<n;j++)base[j]+=tot[j]?(s.vals[j]||0)/tot[j]:0;
+    let d='M'+x(0).toFixed(1)+' '+y(lo[0]).toFixed(1);
+    for(let j=1;j<n;j++)d+='L'+x(j).toFixed(1)+' '+y(lo[j]).toFixed(1);
+    for(let j=n-1;j>=0;j--)d+='L'+x(j).toFixed(1)+' '+y(base[j]).toFixed(1);
+    return '<path d="'+d+'Z" fill="'+s.color+'" opacity=".88"><title>'+s.name+
+           '</title></path>';
+  }).join('');
+  const ticks=[0,.5,1].map(f=>'<line class="gl" x1="'+P.l+'" y1="'+y(f).toFixed(1)+
+    '" x2="'+(W-P.r)+'" y2="'+y(f).toFixed(1)+'"/><text x="'+(P.l-5)+'" y="'+
+    (y(f)+3).toFixed(1)+'" text-anchor="end">'+(f*100)+'</text>').join('');
+  const step=Math.max(1,Math.ceil(n/10));
+  const xl=labels.map((l,j)=>j%step?'':'<text x="'+x(j).toFixed(1)+'" y="'+(H-6)+
+    '" text-anchor="middle">'+l.slice(5)+'</text>').join('');
+  const mk=markIdx>=0?'<line x1="'+x(markIdx).toFixed(1)+'" y1="'+P.t+'" x2="'+
+    x(markIdx).toFixed(1)+'" y2="'+(H-P.b)+'" stroke="var(--gold)" '+
+    'stroke-width="1.5" stroke-dasharray="3 3"/>':'';
+  return '<svg class="chart" viewBox="0 0 '+W+' '+H+'">'+bands+ticks+mk+xl+'</svg>';
+}
+
+function secLegend(el,names,onToggle){
+  el.innerHTML=names.map(g=>'<span class="'+(SECHIDE.has(g)?'off':'')+
+    '" data-g="'+g+'"><i style="background:'+secColor(g)+'"></i>'+
+    (g===MKT?'Market':g)+'</span>').join('');
+  if(onToggle)el.querySelectorAll('span').forEach(s=>s.onclick=()=>{
+    const g=s.dataset.g;
+    if(SECHIDE.has(g))SECHIDE.delete(g);else SECHIDE.add(g);
+    onToggle();});
+}
+
+/* ---------- render ---------- */
+function secFillScripFilter(){
+  const el=$('#fScripSector'); if(!el||!SEC)return;
+  const cur=el.value;
+  const gs=[...new Set(SCRIPS.map(s=>s.sector).filter(Boolean))].sort();
+  el.innerHTML='<option value="">All sectors</option>'+
+    gs.map(g=>'<option value="'+g+'">'+g+'</option>').join('');
+  if(gs.indexOf(cur)>=0)el.value=cur;
+}
+
+async function renderSectors(){
+  if(!SEC){
+    $('#secWarn').innerHTML='<div class="warn"><b>No sector map.</b> '+
+      'data/sectors.json was not published with this build — run '+
+      '<code>get_listed_securities.py</code>, then rebuild the site.</div>';
+    return;
+  }
+  await ensurePanel();
+
+  const A=secAgg(), tot=A.reduce((a,o)=>a+o.turnover,0)||1;
+  const un=secUnmapped();
+  if(!A.length){
+    $('#secHint').textContent='';
+    $('#secWarn').innerHTML='<div class="warn">Nothing in this selection maps to '+
+      'a sector on the current basis.</div>';
+    ['tSector','tSecRet','tSecBroker'].forEach(id=>{$('#'+id).innerHTML='';});
+    ['secShareBars','secDriftBars','secIdxChart','secIdxLegend','secStack',
+     'secStackLegend','secBreadth'].forEach(id=>{$('#'+id).innerHTML='';});
+    return;
+  }
+  $('#secHint').textContent=A.length+' sector'+(A.length===1?'':'s')+' · '+
+    A.reduce((a,o)=>a+o.n,0)+' scrips · '+npr(tot);
+  $('#secWarn').innerHTML = un.length
+    ? '<div class="warn"><b>'+un.length+' symbol'+(un.length===1?'':'s')+
+      '</b> traded but are not in the listing table: '+
+      un.slice(0,12).map(s=>s.sym).join(', ')+
+      (un.length>12?' …':'')+'. They are bucketed as Unmapped. Run the '+
+      '<code>nepse-listed</code> workflow, or add them to '+
+      '<code>reference/sector_overrides.csv</code>.</div>'
+    : '';
+
+  const secCols=[
+    {k:'g',h:'Sector',f:r=>r.g},
+    {k:'turnover',h:'Turnover',num:1,sort:1,f:r=>npr(r.turnover,'')},
+    {k:'share',h:'Share %',num:1,f:r=>r.share.toFixed(1)},
+    {k:'volume',h:'Volume',num:1,f:r=>num(r.volume)},
+    {k:'trades',h:'Trades',num:1,f:r=>num(r.trades)},
+    {k:'n',h:'Traded',num:1,f:r=>r.n},
+    {k:'listed',h:'Listed',num:1,f:r=>r.listed||'—'},
+    {k:'part',h:'Particip %',num:1,f:r=>r.listed?r.part.toFixed(0):'—'},
+    {k:'avgTicket',h:'Avg ticket',num:1,f:r=>npr(r.avgTicket,'')},
+    {k:'top3',h:'Top-3 %',num:1,f:r=>r.top3.toFixed(0)},
+    {k:'breadth',h:'Above VWAP %',num:1,f:r=>r.breadth.toFixed(0),
+     cls:r=>r.breadth>=50?'pos':'neg'}];
+  /* Only worth a column once promoter shares are actually in the numbers —
+     under the equity basis it would be a column of zeroes. */
+  if(SECOPT.basis!=='equity')
+    secCols.splice(3,0,{k:'promPct',h:'Promoter %',num:1,
+      f:r=>r.nProm?r.promPct.toFixed(1):'—'});
+  makeTable('tSector',secCols,()=>A, g=>openSector(g))();
+
+  barList($('#secShareBars'),A.slice(0,14).map(o=>({k:o.g,v:o.turnover,
+    t:npr(o.turnover,'')+' · '+o.share.toFixed(1)+'%',
+    click:"openSector('"+o.g.replace(/'/g,"\\'")+"')"})));
+
+  const dr=secDrift();
+  if(!dr){
+    $('#secDriftBars').innerHTML='<div class="empty">No earlier window of the '+
+      'same length to compare against.</div>';
+  }else{
+    const rows=A.map(o=>({k:o.g,v:dr[o.g]||0,
+      t:(dr[o.g]>=0?'+':'')+(dr[o.g]||0).toFixed(2)+' pp',
+      click:"openSector('"+o.g.replace(/'/g,"\\'")+"')"}))
+      .sort((a,b)=>b.v-a.v);
+    barList($('#secDriftBars'),rows,{diverging:1});
+  }
+
+  secDrawIndex();
+  secDrawStack();
+
+  barList($('#secBreadth'),A.slice(0,14).map(o=>({k:o.g,v:o.breadth,
+    t:o.breadth.toFixed(0)+'% · range '+o.rangeAvg.toFixed(1)+'%',
+    click:"openSector('"+o.g.replace(/'/g,"\\'")+"')"})),{color:'var(--buy)'});
+
+  secDrawBrokerMatrix();
+}
+
+function secDrawIndex(){
+  const R=secReturns(), D=R.dates;
+  const win=+$('#secIdxWin').value, topN=+$('#secIdxN').value;
+  const i0=win>0?Math.max(0,D.length-win-1):0;
+  const labels=D.slice(i0);
+  const A=secAgg();
+  const names=A.slice(0,topN).map(o=>o.g).filter(g=>R.g[g]);
+  const series=names.concat([MKT]).map(g=>{
+    const idx=R.g[g].idx, b=idx[i0]||100;
+    return {name:g,color:secColor(g),
+            vals:idx.slice(i0).map(v=>v==null?null:100*v/b)};
+  });
+  $('#secIdxChart').innerHTML=multiLine(labels,series,
+    {base:100,mark:D.indexOf(DATE)-i0});
+  secLegend($('#secIdxLegend'),names.concat([MKT]),secDrawIndex);
+
+  const drop=R.dropped.slice(i0).reduce((a,b)=>a+b,0);
+  $('#secIdxHint').textContent=labels.length+' sessions · '+drop+
+    ' scrip-day move'+(drop===1?'':'s')+' past the 10% circuit dropped';
+
+  /* NA sorts to the bottom rather than poisoning the numeric compare in
+     makeTable, so the sentinel goes in the data and the formatter reads it. */
+  const NA=-9;
+  const nz=v=>v==null?NA:v;
+  const e=D.length-1;
+  const rows=names.map(g=>{
+    const a21=secRet(g,e,21), m21=secRet(MKT,e,21);
+    return {g:g, r1:nz(secRet(g,e,1)), r5:nz(secRet(g,e,5)), r21:nz(a21),
+            rw:nz(secRet(g,e,labels.length-1)),
+            rs:nz((a21==null||m21==null)?null:(1+a21)/(1+m21)-1)};});
+  const fp=v=>v<=NA?'—':(v>=0?'+':'')+(100*v).toFixed(2);
+  const cl=v=>v<=NA?'':(v>=0?'pos':'neg');
+  makeTable('tSecRet',[
+    {k:'g',h:'Sector',f:r=>r.g},
+    {k:'r1',h:'1d %',num:1,f:r=>fp(r.r1),cls:r=>cl(r.r1)},
+    {k:'r5',h:'5d %',num:1,f:r=>fp(r.r5),cls:r=>cl(r.r5)},
+    {k:'r21',h:'21d %',num:1,sort:1,f:r=>fp(r.r21),cls:r=>cl(r.r21)},
+    {k:'rw',h:'Window %',num:1,f:r=>fp(r.rw),cls:r=>cl(r.rw)},
+    {k:'rs',h:'RS 21d %',num:1,f:r=>fp(r.rs),cls:r=>cl(r.rs)}],
+    ()=>rows, g=>openSector(g))();
+}
+
+function secDrawStack(){
+  const P=secPanel(), A=secAgg();
+  /* A sector can exist in today's selection and not in panel.json — a name that
+     started trading after the panel was last written, or one the map has but the
+     archive does not. Take the intersection rather than trusting either side. */
+  const names=A.slice(0,9).map(o=>o.g).filter(g=>P.byG[g]);
+  const rest=Object.keys(P.byG).filter(g=>names.indexOf(g)<0);
+  const series=names.map(g=>({name:g,color:secColor(g),vals:P.byG[g]}));
+  if(rest.length){
+    const other=new Array(P.dates.length).fill(0);
+    rest.forEach(g=>{for(let j=0;j<other.length;j++)other[j]+=P.byG[g][j]||0;});
+    series.push({name:'Other',color:'#C7CEDB',vals:other});
+  }
+  $('#secStack').innerHTML=stackArea(P.dates,series,P.dates.indexOf(DATE));
+  secLegend($('#secStackLegend'),series.map(s=>s.name),null);
+}
+
+function secDrawBrokerMatrix(){
+  const A=secAgg(), groups=A.slice(0,12).map(o=>o.g);
+  const n=+$('#secBrokerN').value;
+  const top=BROKERS.slice(0,n).map(b=>b.code);
+  const gi={}; groups.forEach((g,i)=>gi[g]=i);
+  const bi={}; top.forEach((c,i)=>bi[c]=i);
+  const m=top.map(()=>groups.map(()=>0));
+  BSCRIP.forEach(r=>{
+    const g=secOf(r.sym);
+    if(g===null||gi[g]===undefined||bi[r.broker]===undefined)return;
+    m[bi[r.broker]][gi[g]]+=r.buy-r.sell;});
+  let mxa=1;
+  m.forEach(row=>row.forEach(v=>{if(Math.abs(v)>mxa)mxa=Math.abs(v);}));
+  const shade=v=>{
+    if(!v)return '#fff';
+    const t=Math.sqrt(Math.min(1,Math.abs(v)/mxa));
+    return v>0?'rgba(27,127,76,'+(0.08+0.82*t).toFixed(3)+')'
+              :'rgba(176,42,42,'+(0.08+0.82*t).toFixed(3)+')';};
+  let h='<thead><tr><th></th>'+groups.map(g=>'<th class="v">'+g+'</th>').join('')+
+        '<th class="v">Net total</th></tr></thead><tbody>';
+  top.forEach((c,i)=>{
+    const tot=m[i].reduce((a,b)=>a+b,0);
+    h+='<tr><th>'+bname(c)+'</th>';
+    groups.forEach((g,j)=>{
+      h+='<td class="bc" style="background:'+shade(m[i][j])+'" data-v="'+m[i][j]+
+         '" data-b="'+c+'" data-g="'+g+'"></td>';});
+    h+='<td class="num" style="font-weight:600;color:'+
+       (tot>=0?'var(--buy)':'var(--sell)')+'">'+npr(tot,'')+'</td></tr>';});
+  const el=$('#tSecBroker');
+  el.innerHTML=h+'</tbody>';
+  el.querySelectorAll('td.bc').forEach(td=>{
+    td.onmousemove=e=>showTip(e,'<b>'+bname(td.dataset.b)+'</b> · '+
+      td.dataset.g+'<br>net '+npr(+td.dataset.v));
+    td.onmouseleave=hideTip;
+    td.onclick=()=>{hideTip();openBroker(+td.dataset.b);};});
+}
+
+/* ---------- sector drawer ---------- */
+function openSector(g){
+  if(!SEC)return;
+  const A=secAgg(), o=A.find(x=>x.g===g); if(!o)return;
+  $('#dTitle').textContent=g;
+  const mine=SCRIPS.filter(s=>secOf(s.sym)===g);
+  const net=new Map();
+  BSCRIP.forEach(r=>{if(secOf(r.sym)!==g)return;
+    net.set(r.broker,(net.get(r.broker)||0)+r.buy-r.sell);});
+  const nb=[...net.entries()].map(([c,v])=>({c:c,v:v})).sort((a,b)=>b.v-a.v);
+  const R=secReturns().g[g], e=secReturns().dates.length-1;
+  const fp=v=>v==null?'—':(v>=0?'+':'')+(100*v).toFixed(2)+'%';
+
+  $('#dBody').innerHTML='<div class="stat">'+
+    [['Turnover',npr(o.turnover)],['Share',o.share.toFixed(1)+'%'],
+     ['Volume',num(o.volume)],['Trades',num(o.trades)],
+     ['Traded / listed',o.n+' / '+(o.listed||'—')],
+     ['Above VWAP',o.breadth.toFixed(0)+'%'],
+     ['Promoter',o.nProm?o.promPct.toFixed(1)+'% of turnover':'—'],
+     ['1d',fp(secRet(g,e,1))],['21d',fp(secRet(g,e,21))]]
+    .map(([l,v])=>'<div>'+l+'<b>'+v+'</b></div>').join('')+'</div>'+
+    '<h3 class="sec">Scrips by turnover</h3><div id="dSecScrips"></div>'+
+    '<h3 class="sec">Net buyers and sellers in the sector</h3><div id="dSecBr"></div>'+
+    '<h3 class="sec">Chain-linked VWAP index across the archive</h3>'+
+    '<div id="dSecIdx"></div>';
+
+  barList($('#dSecScrips'),mine.sort((a,b)=>b.turnover-a.turnover).slice(0,14)
+    .map(s=>({k:s.sym,v:s.turnover,t:npr(s.turnover,''),
+      click:"openScrip('"+s.sym+"')"})));
+  barList($('#dSecBr'),nb.slice(0,7).concat(nb.slice(-7))
+    .filter((v,i,a)=>a.indexOf(v)===i)
+    .map(r=>({k:bname(r.c),v:r.v,t:npr(r.v,''),click:'openBroker('+r.c+')'})),
+    {diverging:1});
+  if(R)$('#dSecIdx').innerHTML=lineChart(secReturns().dates,R.idx,
+    {unit:'',mark:secReturns().dates.indexOf(DATE)});
+  drawer.classList.add('on'); drawer.scrollTop=0;
+}
+
+/* ---------- sector wiring ---------- */
+['secBasis','secMetric'].forEach(id=>$('#'+id).addEventListener('change',()=>{
+  SECOPT.basis=$('#secBasis').value;
+  SECOPT.metric=$('#secMetric').value;
+  SECHIDE.clear();
+  renderSectors();}));
+['secIdxWin','secIdxN'].forEach(id=>
+  $('#'+id).addEventListener('change',()=>{SECHIDE.clear();secDrawIndex();}));
+$('#secBrokerN').addEventListener('change',secDrawBrokerMatrix);
+
+
+/* ---------- fundamentals ---------- */
+let FUND=null, FUNDI=null;
+const FDOPT={price:'vwap',minT:10};
+
+async function fundLoad(){
+  try{
+    FUND = EMB ? (EMB.fundamentals||null)
+               : await (await fetch('data/fundamentals.json')).json();
+  }catch(e){ FUND=null; }
+  if(FUND&&!FUND.sym)FUND=null;
+  if(FUND){FUNDI={};FUND.cols.forEach((c,i)=>FUNDI[c]=i);}
+  return FUND;
+}
+function fund(sym){
+  if(!FUND)return null;
+  const r=FUND.sym[sym]; if(!r)return null;
+  const o={sym:sym,report:(FUND.report||{})[sym]||''};
+  FUND.cols.forEach((c,i)=>o[c]=r[i]);
+  return o;
+}
+/* The session price this scrip is being valued on. */
+function fundPrice(s){
+  if(FDOPT.price==='last')return s.last;
+  if(FDOPT.price==='close'){const f=fund(s.sym);return f?f.close:null;}
+  return s.vwap;
+}
+/* Scale, do not recompute — see the module docstring. */
+function fundRow(s){
+  const f=fund(s.sym); if(!f)return null;
+  const p=fundPrice(s);
+  const k=(f.close&&p&&f.close>0)?p/f.close:null;
+  return Object.assign({},f,{
+    price:p,
+    drift:(k==null)?null:100*(k-1),
+    peLive:(k==null||f.peD==null)?null:f.peD*k,
+    pbvLive:(k==null||f.pbv==null)?null:f.pbv*k,
+    mcapLive:(p==null||f.shares==null)?null:f.shares*p,
+    turnover:s.turnover, sector:s.sector||'—'});
+}
+function fundRows(){
+  if(!FUND)return [];
+  const minT=FDOPT.minT*LAKH;
+  const q=($('#fdQ')&&$('#fdQ').value||'').trim().toUpperCase();
+  return SCRIPS.map(fundRow).filter(r=>r&&r.turnover>=minT&&
+    (!q||r.sym.indexOf(q)>=0));
+}
+
+/* Market-cap weighted, with the median beside it. A weighted P/E is the honest
+   "what does this sector cost" number; the median says whether one name is
+   carrying the average. Negative and null earnings are dropped from both
+   rather than clamped — a loss-making name has no P/E, it does not have a
+   large one. */
+function fundSectorAgg(rows){
+  const m=new Map();
+  rows.forEach(r=>{
+    const g=r.sector||'—';
+    let o=m.get(g);
+    if(!o){o={g:g,n:0,mcap:0,wPE:0,wPEw:0,wPB:0,wPBw:0,wROE:0,wROEw:0,
+              pes:[],pbs:[]};m.set(g,o);}
+    o.n++;
+    if(r.mcapLive>0)o.mcap+=r.mcapLive;
+    const w=r.mcapLive>0?r.mcapLive:0;
+    if(w&&r.peLive>0){o.wPE+=w*r.peLive;o.wPEw+=w;o.pes.push(r.peLive);}
+    if(w&&r.pbvLive>0){o.wPB+=w*r.pbvLive;o.wPBw+=w;o.pbs.push(r.pbvLive);}
+    if(w&&r.roeTTM!=null){o.wROE+=w*r.roeTTM;o.wROEw+=w;}
+  });
+  const med=a=>{if(!a.length)return null;const b=a.slice().sort((x,y)=>x-y);
+    const i=b.length>>1;return b.length%2?b[i]:(b[i-1]+b[i])/2;};
+  return [...m.values()].map(o=>({
+    g:o.g,n:o.n,mcap:o.mcap,
+    pe:o.wPEw?o.wPE/o.wPEw:null, peMed:med(o.pes),
+    pb:o.wPBw?o.wPB/o.wPBw:null, pbMed:med(o.pbs),
+    roe:o.wROEw?o.wROE/o.wROEw:null})).sort((a,b)=>b.mcap-a.mcap);
+}
+
+/* ---------- bubble chart ---------- */
+/* Ordinary least squares. Returned in whatever space it was given, so the
+   caller fits in log space when the axes are logarithmic — a straight line on
+   a log-log plot is a power law, which is the right family for multiples. */
+function ols(pts){
+  const n=pts.length;
+  if(n<3)return null;
+  let sx=0,sy=0;
+  pts.forEach(p=>{sx+=p.x;sy+=p.y;});
+  const mx=sx/n,my=sy/n;
+  let sxy=0,sxx=0,syy=0;
+  pts.forEach(p=>{const dx=p.x-mx,dy=p.y-my;sxy+=dx*dy;sxx+=dx*dx;syy+=dy*dy;});
+  if(sxx<=0)return null;
+  const b=sxy/sxx, a=my-b*mx;
+  const r2=(syy>0)?(sxy*sxy)/(sxx*syy):0;
+  return {a:a,b:b,r2:r2,n:n};
+}
+/* Percentile bound. Multiples are long-tailed — one 400x P/E flattens every
+   other point into a corner — so the axes are trimmed and the strays are drawn
+   pinned to the edge rather than dropped, which would hide them entirely. */
+function pctl(vals,q){
+  if(!vals.length)return null;
+  const a=vals.slice().sort((x,y)=>x-y);
+  const i=Math.min(a.length-1,Math.max(0,Math.round(q*(a.length-1))));
+  return a[i];
+}
+
+/* pts: {x,y,r,label,color,tip}. `iso` draws y = k*x rays, which is exact for
+   both pairs on this tab. `fit` overlays OLS instead. */
+function bubbleChart(pts,o){
+  o=o||{};
+  const W=580,H=420,P={l:52,r:16,t:26,b:46};
+  const log=!!o.log;
+  const good=pts.filter(p=>p.x!=null&&p.y!=null&&isFinite(p.x)&&isFinite(p.y)&&
+    (!log||(p.x>0&&p.y>0)));
+  if(good.length<2)return {svg:'<div class="empty">Not enough priced names.</div>',
+                           fit:null,n:0,off:0};
+
+  const xs=good.map(p=>p.x), ys=good.map(p=>p.y);
+  let x0=pctl(xs,0.02), x1=pctl(xs,0.98), y0=pctl(ys,0.02), y1=pctl(ys,0.98);
+  if(log){x0=Math.max(x0,1e-3);y0=Math.max(y0,1e-3);}
+  if(!(x1>x0)){x1=x0*1.5+1;} if(!(y1>y0)){y1=y0*1.5+1;}
+  /* Padding has to match the axis. Subtracting a linear margin from a log
+     domain walks the low end toward zero — a P/E floor of 3 becomes 0.001 —
+     and every tick then prints as 0.00. Pad by a factor instead. */
+  if(log){
+    const fx=Math.pow(x1/x0,0.04), fy=Math.pow(y1/y0,0.04);
+    x0/=fx; x1*=fx; y0/=fy; y1*=fy;
+    x0=Math.max(x0,1e-3); y0=Math.max(y0,1e-3);
+  }else{
+    const px=(x1-x0)*0.06, py=(y1-y0)*0.06;
+    x0-=px; x1+=px; y0-=py; y1+=py;
+  }
+
+  const tx=v=>log?Math.log(Math.max(v,1e-6)):v;
+  const X0=tx(x0),X1=tx(x1),Y0=tx(y0),Y1=tx(y1);
+  const sx=v=>P.l+(W-P.l-P.r)*((tx(v)-X0)/(X1-X0||1));
+  const sy=v=>H-P.b-(H-P.t-P.b)*((tx(v)-Y0)/(Y1-Y0||1));
+  const clampX=v=>Math.min(Math.max(v,x0),x1);
+  const clampY=v=>Math.min(Math.max(v,y0),y1);
+
+  const rmax=Math.max(...good.map(p=>p.r||0),1);
+  const rad=v=>3+16*Math.sqrt(Math.max(v,0)/rmax);   // area, not radius
+
+  const ticks=(lo,hi)=>{
+    if(log){
+      const out=[];
+      for(let e=Math.floor(Math.log10(lo));e<=Math.ceil(Math.log10(hi));e++)
+        for(const m of [1,2,5]){const v=m*Math.pow(10,e);
+          if(v>=lo&&v<=hi)out.push(v);}
+      return out.length>1?out:[lo,hi];
+    }
+    const out=[];for(let i=0;i<=5;i++)out.push(lo+(hi-lo)*i/5);return out;
+  };
+  const fmt=v=>Math.abs(v)>=100?v.toFixed(0):(Math.abs(v)>=10?v.toFixed(1):v.toFixed(2));
+
+  let g='';
+  ticks(x0,x1).forEach(v=>{g+='<line class="gl" x1="'+sx(v).toFixed(1)+'" y1="'+P.t+
+    '" x2="'+sx(v).toFixed(1)+'" y2="'+(H-P.b)+'"/><text x="'+sx(v).toFixed(1)+
+    '" y="'+(H-P.b+14)+'" text-anchor="middle">'+fmt(v)+'</text>';});
+  ticks(y0,y1).forEach(v=>{g+='<line class="gl" x1="'+P.l+'" y1="'+sy(v).toFixed(1)+
+    '" x2="'+(W-P.r)+'" y2="'+sy(v).toFixed(1)+'"/><text x="'+(P.l-6)+'" y="'+
+    (sy(v)+3).toFixed(1)+'" text-anchor="end">'+fmt(v)+'</text>';});
+
+  /* Exact rays y = k*x. Labelled where they leave the plot, so the label sits
+     next to the line it belongs to rather than in a legend. */
+  let iso='';
+  if(o.iso&&o.iso.length){
+    o.iso.forEach(k=>{
+      const seg=[];
+      for(let i=0;i<=40;i++){
+        const xv=log?Math.exp(X0+(X1-X0)*i/40):x0+(x1-x0)*i/40;
+        const yv=k*xv;
+        if(yv>=y0&&yv<=y1)seg.push([sx(xv),sy(yv)]);
+      }
+      if(seg.length<2)return;
+      iso+='<path class="iso" d="M'+seg.map(p=>p[0].toFixed(1)+' '+
+        p[1].toFixed(1)).join(' L')+'"/>';
+      const e=seg[seg.length-1];
+      iso+='<text class="isolab" x="'+(e[0]-3).toFixed(1)+'" y="'+
+        (e[1]-4).toFixed(1)+'" text-anchor="end">'+
+        (o.isoLabel?o.isoLabel(k):k)+'</text>';
+    });
+  }
+
+  let fit=null,fitPath='';
+  if(o.fit==='ols'){
+    fit=ols(good.map(p=>({x:log?Math.log(p.x):p.x,y:log?Math.log(p.y):p.y})));
+    if(fit){
+      const at=xv=>{const t=fit.a+fit.b*(log?Math.log(xv):xv);
+        return log?Math.exp(t):t;};
+      const seg=[];
+      for(let i=0;i<=40;i++){
+        const xv=log?Math.exp(X0+(X1-X0)*i/40):x0+(x1-x0)*i/40;
+        const yv=at(xv);
+        if(yv>=y0&&yv<=y1)seg.push([sx(xv),sy(yv)]);
+      }
+      if(seg.length>1)fitPath='<path class="ols" d="M'+seg.map(p=>
+        p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' L')+'"/>';
+      fit.at=at;
+    }
+  }
+
+  let off=0;
+  const byR=good.slice().sort((a,b)=>(b.r||0)-(a.r||0));
+  const labelN=o.labelN||0;
+  const labelled=new Set(byR.slice(0,labelN).map(p=>p.label));
+  let dots='',labs='';
+  byR.slice().reverse().forEach(p=>{
+    const outside=p.x<x0||p.x>x1||p.y<y0||p.y>y1;
+    if(outside)off++;
+    const cx=sx(clampX(p.x)),cy=sy(clampY(p.y));
+    dots+='<circle cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="'+
+      rad(p.r||0).toFixed(1)+'" fill="'+(p.color||'var(--navy)')+'" opacity="'+
+      (outside?0.35:0.72)+'" data-s="'+p.label+'" data-t="'+
+      (p.tip||'').replace(/"/g,'&quot;')+'"/>';
+    if(labelled.has(p.label))
+      labs+='<text class="plab" x="'+(cx+rad(p.r||0)+2).toFixed(1)+'" y="'+
+        (cy+3).toFixed(1)+'">'+p.label+'</text>';
+  });
+
+  const svg='<svg class="bub" viewBox="0 0 '+W+' '+H+'">'+
+    '<text class="atitle" x="'+P.l+'" y="14">'+(o.title||'')+'</text>'+
+    g+iso+fitPath+dots+labs+
+    '<line class="ax" x1="'+P.l+'" y1="'+(H-P.b)+'" x2="'+(W-P.r)+'" y2="'+
+      (H-P.b)+'"/>'+
+    '<line class="ax" x1="'+P.l+'" y1="'+P.t+'" x2="'+P.l+'" y2="'+(H-P.b)+'"/>'+
+    '<text x="'+((P.l+W-P.r)/2)+'" y="'+(H-8)+'" text-anchor="middle">'+
+      (o.xlab||'')+'</text>'+
+    '<text x="14" y="'+((P.t+H-P.b)/2)+'" text-anchor="middle" transform="rotate(-90 14 '+
+      ((P.t+H-P.b)/2)+')">'+(o.ylab||'')+'</text></svg>';
+  return {svg:svg,fit:fit,n:good.length,off:off};
+}
+
+function bindBubbles(el){
+  el.querySelectorAll('circle[data-s]').forEach(c=>{
+    c.onmousemove=e=>showTip(e,c.dataset.t);
+    c.onmouseleave=hideTip;
+    c.onclick=()=>{hideTip();openScrip(c.dataset.s);};});
+}
+function secColorSafe(g){
+  return (typeof secColor==='function')?secColor(g):'var(--navy)';
+}
+
+function renderFundCharts(rows){
+  const log=$('#fdScale').value==='log';
+  const fitMode=$('#fdFit').value;
+  const labelN=+$('#fdLabel').value;
+  const iso=fitMode==='iso';
+
+  const mk=(sel,fsel,pts,o)=>{
+    const r=bubbleChart(pts,Object.assign({log:log,labelN:labelN,
+      fit:fitMode==='ols'?'ols':null},o));
+    $(sel).innerHTML=r.svg; bindBubbles($(sel));
+    let note=r.n+' names';
+    if(r.off)note+=' · '+r.off+' pinned to the edge, outside the 2–98% range';
+    if(r.fit)note+=' · <b>'+o.fitLabel(r.fit)+'</b>  R²='+r.fit.r2.toFixed(2);
+    $(fsel).innerHTML=note;
+  };
+
+  /* P/B = P/E x ROE, so a ray is a line of constant ROE. */
+  mk('#fdPEPB','#fdPEPBFit',
+     rows.filter(r=>r.peLive>0&&r.pbvLive>0).map(r=>({
+       x:r.peLive,y:r.pbvLive,r:r.mcapLive||0,label:r.sym,
+       color:secColorSafe(r.sector),
+       tip:'<b>'+r.sym+'</b> · '+r.sector+'<br>P/E '+r.peLive.toFixed(1)+
+         ' · P/B '+r.pbvLive.toFixed(2)+'<br>implied ROE '+
+         (100*r.pbvLive/r.peLive).toFixed(1)+'%<br>'+npr(r.mcapLive)})),
+     {title:'P/B against P/E — rays are constant ROE',
+      xlab:'P/E (live)',ylab:'P/B (live)',
+      iso:iso?[0.05,0.10,0.15,0.20,0.30,0.45]:null,
+      isoLabel:k=>(100*k).toFixed(0)+'% ROE',
+      fitLabel:f=>log?('P/B ∝ P/E^'+f.b.toFixed(2)):
+                     ('P/B = '+f.b.toFixed(3)+'·P/E + '+f.a.toFixed(2))});
+
+  /* ROE = ROA x equity multiplier, so a ray is constant leverage. */
+  mk('#fdROE','#fdROEFit',
+     rows.filter(r=>r.roeTTM>0&&r.roaTTM>0).map(r=>({
+       x:r.roaTTM,y:r.roeTTM,r:r.mcapLive||0,label:r.sym,
+       color:secColorSafe(r.sector),
+       tip:'<b>'+r.sym+'</b> · '+r.sector+'<br>ROA '+r.roaTTM.toFixed(2)+
+         '% · ROE '+r.roeTTM.toFixed(1)+'%<br>implied leverage '+
+         (r.roeTTM/r.roaTTM).toFixed(1)+'x<br>'+npr(r.mcapLive)})),
+     {title:'ROE against ROA — rays are constant leverage',
+      xlab:'ROA TTM %',ylab:'ROE TTM %',
+      iso:iso?[1,2,4,8,12,16]:null,
+      isoLabel:k=>k+'x',
+      fitLabel:f=>log?('ROE ∝ ROA^'+f.b.toFixed(2)):
+                     ('ROE = '+f.b.toFixed(2)+'·ROA + '+f.a.toFixed(2))});
+}
+
+/* ---------- render ---------- */
+function renderFund(){
+  if(!FUND){
+    $('#fdStale').innerHTML='<div class="stale"><b>No fundamentals.</b> '+
+      'data/fundamentals.json was not published with this build — run '+
+      '<code>fundamentals_scrape.py</code>, then rebuild the site.</div>';
+    return;
+  }
+  const rows=fundRows();
+  const covered=SCRIPS.filter(s=>fund(s.sym)).length;
+  const missing=SCRIPS.filter(s=>!fund(s.sym)&&s.turnover>=10*LAKH);
+  $('#fdHint').textContent=rows.length+' of '+SCRIPS.length+' traded names · '+
+    covered+' with fundamentals';
+
+  const notes=[];
+  if(FUND.asof)notes.push('Snapshot as of <b>'+FUND.asof+'</b>'+
+    (DATE?(' · viewing <b>'+(RANGE?RANGE[RANGE.length-1]:DATE)+'</b>'):''));
+  if(missing.length)notes.push('<b>'+missing.length+'</b> name'+
+    (missing.length===1?'':'s')+' traded above Rs 10 L with no fundamentals: '+
+    missing.slice(0,10).map(s=>s.sym).join(', ')+(missing.length>10?' …':''));
+  if((FUND.unmatched||[]).length)notes.push('<b>'+FUND.unmatched.length+
+    '</b> vendor row(s) never resolved to a symbol — add them to '+
+    '<code>reference/fundamentals_alias.csv</code>.');
+  $('#fdStale').innerHTML=notes.length
+    ? '<div class="stale">'+notes.join('<br>')+'</div>' : '';
+
+  const n2=v=>v==null?'—':v.toFixed(2);
+  const n1=v=>v==null?'—':v.toFixed(1);
+  makeTable('tFund',[
+    {k:'sym',h:'Scrip',f:r=>r.sym},
+    {k:'sector',h:'Sector',f:r=>r.sector},
+    {k:'report',h:'Report',f:r=>r.report||'—'},
+    {k:'price',h:'Price',num:1,f:r=>n1(r.price)},
+    {k:'drift',h:'vs close %',num:1,f:r=>r.drift==null?'—':
+      (r.drift>=0?'+':'')+r.drift.toFixed(1),
+     cls:r=>r.drift==null?'':(r.drift>=0?'pos':'neg')},
+    {k:'mcapLive',h:'Mkt cap',num:1,sort:1,f:r=>npr(r.mcapLive,'')},
+    {k:'peLive',h:'P/E',num:1,f:r=>n2(r.peLive)},
+    {k:'pbvLive',h:'P/B',num:1,f:r=>n2(r.pbvLive)},
+    {k:'epsD',h:'EPS (D)',num:1,f:r=>n2(r.epsD)},
+    {k:'bvps',h:'BVPS',num:1,f:r=>n1(r.bvps)},
+    {k:'roeTTM',h:'ROE %',num:1,f:r=>n1(r.roeTTM)},
+    {k:'npmTTM',h:'Net margin %',num:1,f:r=>n1(r.npmTTM)},
+    {k:'rsi',h:'RSI',num:1,f:r=>n1(r.rsi)},
+    {k:'turnover',h:'Turnover',num:1,f:r=>npr(r.turnover,'')}],
+    ()=>rows, s=>openScrip(s))();
+
+  const sec=fundSectorAgg(rows);
+  makeTable('tFundSec',[
+    {k:'g',h:'Sector',f:r=>r.g},
+    {k:'n',h:'Names',num:1,f:r=>r.n},
+    {k:'mcap',h:'Mkt cap',num:1,sort:1,f:r=>npr(r.mcap,'')},
+    {k:'pe',h:'P/E wtd',num:1,f:r=>n2(r.pe)},
+    {k:'peMed',h:'P/E med',num:1,f:r=>n2(r.peMed)},
+    {k:'pb',h:'P/B wtd',num:1,f:r=>n2(r.pb)},
+    {k:'pbMed',h:'P/B med',num:1,f:r=>n2(r.pbMed)},
+    {k:'roe',h:'ROE % wtd',num:1,f:r=>n1(r.roe)}],
+    ()=>sec)();
+
+  const cheap=rows.filter(r=>r.peLive>0).sort((a,b)=>a.peLive-b.peLive).slice(0,14);
+  barList($('#fdCheap'),cheap.map(r=>({k:r.sym,v:1/r.peLive,
+    t:r.peLive.toFixed(1)+'x · '+npr(r.turnover,''),
+    click:"openScrip('"+r.sym+"')"})),{color:'var(--buy)'});
+
+  const drift=rows.filter(r=>r.drift!=null)
+    .sort((a,b)=>Math.abs(b.drift)-Math.abs(a.drift)).slice(0,14);
+  barList($('#fdDrift'),drift.map(r=>({k:r.sym,v:r.drift,
+    t:(r.drift>=0?'+':'')+r.drift.toFixed(1)+'%',
+    click:"openScrip('"+r.sym+"')"})),{diverging:1});
+
+  renderFundCharts(rows);
+}
+
+/* ---------- fundamentals wiring ---------- */
+['fdPrice','fdMinT'].forEach(id=>$('#'+id).addEventListener('change',()=>{
+  FDOPT.price=$('#fdPrice').value;
+  FDOPT.minT=+$('#fdMinT').value;
+  renderFund();}));
+$('#fdQ').addEventListener('input',renderFund);
+/* The charts read the same rows the tables do, so redraw only those. */
+['fdFit','fdScale','fdLabel'].forEach(id=>
+  $('#'+id).addEventListener('change',()=>{
+    if(FUND)renderFundCharts(fundRows());}));
+
+
+/* ---------- wiring ---------- */
+/* ---------- timeline slicer ---------- */
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const TL={level:'month',buckets:[],sel:[0,0],drag:null,syncing:false};
+
+function bucketKey(d,level){
+  const y=+d.slice(0,4), m=+d.slice(5,7), day=+d.slice(8,10);
+  if(level==='day')return d;
+  if(level==='month')return d.slice(0,7);
+  if(level==='quarter')return y+'-Q'+Math.ceil(m/3);
+  const dt=new Date(Date.UTC(y,m-1,day));               // week: Monday start
+  dt.setUTCDate(dt.getUTCDate()-((dt.getUTCDay()+6)%7));
+  return dt.toISOString().slice(0,10);
+}
+function bucketLabel(key,level){
+  if(level==='day')  return MON[+key.slice(5,7)-1]+' '+(+key.slice(8,10));
+  if(level==='month')return MON[+key.slice(5,7)-1]+" '"+key.slice(2,4);
+  if(level==='quarter')return key.slice(5)+" '"+key.slice(2,4);
+  return MON[+key.slice(5,7)-1]+' '+(+key.slice(8,10));
+}
+function buildBuckets(){
+  const m=new Map();
+  IDX.dates.forEach(d=>{
+    const k=bucketKey(d,TL.level);
+    const b=m.get(k)||{key:k,label:bucketLabel(k,TL.level),dates:[],turnover:0};
+    b.dates.push(d); b.turnover+=IDX.kpi[d].turnover; m.set(k,b);
+  });
+  TL.buckets=[...m.values()].sort((a,b)=>a.key<b.key?-1:1);
+  TL.buckets.forEach(b=>{b.from=b.dates[0];b.to=b.dates[b.dates.length-1];});
+}
+function selDates(){
+  const a=TL.buckets[TL.sel[0]], b=TL.buckets[TL.sel[1]];
+  return IDX.dates.filter(d=>d>=a.from&&d<=b.to);
+}
+function renderTimeline(){
+  const track=$('#tlTrack'), n=TL.buckets.length;
+  const mx=Math.max(...TL.buckets.map(b=>b.turnover),1);
+  track.querySelectorAll('.bk').forEach(e=>e.remove());
+  const w=100/n;
+  TL.buckets.forEach((b,i)=>{
+    const el=document.createElement('div');
+    el.className='bk'+(i>=TL.sel[0]&&i<=TL.sel[1]?' on':'');
+    el.style.left=(i*w+w*0.12)+'%'; el.style.width=(w*0.76)+'%';
+    el.style.height=Math.max(3,42*b.turnover/mx)+'px';
+    el.title=b.label+' — '+npr(b.turnover*LAKH)+' · '+b.dates.length+' session(s)';
+    track.appendChild(el);
+  });
+  const l=TL.sel[0]*w, r=(TL.sel[1]+1)*w;
+  $('#tlSel').style.left=l+'%'; $('#tlSel').style.width=(r-l)+'%';
+  $('#tlH0').style.left=l+'%'; $('#tlH1').style.left=r+'%';
+  const step=Math.max(1,Math.ceil(n/14));
+  $('#tlAxis').innerHTML=TL.buckets.map((b,i)=>i%step?'':
+    `<span style="left:${(i*w+w/2)}%">${b.label}</span>`).join('');
+  const a=TL.buckets[TL.sel[0]], z=TL.buckets[TL.sel[1]];
+  $('#tlLabel').textContent=TL.sel[0]===TL.sel[1]?a.label:a.label+' – '+z.label;
+  const ds=selDates();
+  $('#tlSub').textContent=`${ds.length} session${ds.length>1?'s':''} · `+
+    `${ds[0]} to ${ds[ds.length-1]}`;
+}
+function applyTimeline(){
+  const ds=selDates();
+  if(!ds.length)return;
+  TL.syncing=true;
+  (ds.length===1?show(ds[0]):showRange(ds[0],ds[ds.length-1]))
+    .finally(()=>{TL.syncing=false;});
+}
+function idxFromX(clientX){
+  const r=$('#tlTrack').getBoundingClientRect();
+  return Math.max(0,Math.min(TL.buckets.length-1,
+    Math.floor((clientX-r.left)/r.width*TL.buckets.length)));
+}
+function startDrag(e,mode){
+  e.preventDefault();
+  const i=idxFromX(e.clientX);
+  TL.drag = mode==='h0' ? {anchor:TL.sel[1]}
+          : mode==='h1' ? {anchor:TL.sel[0]}
+          : {anchor:i};
+  if(mode==='track')TL.sel=[i,i];
+  moveDrag(e);
+  window.addEventListener('pointermove',moveDrag);
+  window.addEventListener('pointerup',endDrag,{once:true});
+}
+function moveDrag(e){
+  if(!TL.drag)return;
+  const i=idxFromX(e.clientX), a=TL.drag.anchor;
+  TL.sel=[Math.min(a,i),Math.max(a,i)];
+  renderTimeline();                       // instant feedback, no data loaded yet
+}
+function endDrag(){
+  window.removeEventListener('pointermove',moveDrag);
+  TL.drag=null;
+  applyTimeline();                        // load only once, on release
+}
+$('#tlTrack').addEventListener('pointerdown',e=>{
+  if(e.target.classList.contains('tlh'))return;
+  startDrag(e,'track');});
+$('#tlH0').addEventListener('pointerdown',e=>startDrag(e,'h0'));
+$('#tlH1').addEventListener('pointerdown',e=>startDrag(e,'h1'));
+$('#tlLevel').onchange=()=>{
+  const keep=selDates();
+  TL.level=$('#tlLevel').value; buildBuckets();
+  const from=keep[0], to=keep[keep.length-1];
+  let i0=TL.buckets.findIndex(b=>b.to>=from), i1=TL.buckets.findIndex(b=>b.from>to);
+  TL.sel=[i0<0?0:i0, (i1<0?TL.buckets.length:i1)-1];
+  if(TL.sel[1]<TL.sel[0])TL.sel[1]=TL.sel[0];
+  renderTimeline(); applyTimeline();};
+$('#tlAll').onclick=()=>{TL.sel=[0,TL.buckets.length-1];renderTimeline();applyTimeline();};
+
+/* Day controls stay authoritative for stepping one session at a time; using
+   them drops the timeline to day level so the two never disagree. */
+function syncTimelineToDay(date){
+  if(TL.syncing)return;
+  if(TL.level!=='day'){TL.level='day';$('#tlLevel').value='day';buildBuckets();}
+  const i=TL.buckets.findIndex(b=>b.key===date);
+  if(i>=0){TL.sel=[i,i];renderTimeline();}
+}
+$('#daySel').onchange=e=>show(e.target.value);
+$('#dayDate').onchange=e=>{ if(IDX.dates.includes(e.target.value))show(e.target.value);
+  else{ const near=IDX.dates.filter(d=>d<=e.target.value).pop()||IDX.dates[0];
+    alert(`No session on ${e.target.value}. Opening ${near}.`); show(near);} };
+$('#prev').onclick=()=>show(IDX.dates[IDX.dates.indexOf(DATE)-1]);
+$('#next').onclick=()=>show(IDX.dates[IDX.dates.indexOf(DATE)+1]);
+$('#latest').onclick=()=>show(IDX.dates[IDX.dates.length-1]);
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
+  if(e.key==='ArrowLeft'&&!$('#prev').disabled)$('#prev').click();
+  if(e.key==='ArrowRight'&&!$('#next').disabled)$('#next').click();});
+['qBroker','fBrokerSide','qScrip','fScripSector','qBlock','fBlockType'].forEach(id=>
+  $('#'+id).addEventListener('input',refreshTables));
+$('#fFlowN').addEventListener('change',drawFlow);
+['trBroker','trBrokerMode'].forEach(id=>$('#'+id).addEventListener('change',drawBrokerTrend));
+['trScrip','trScripMode'].forEach(id=>$('#'+id).addEventListener('change',drawScripTrend));
+$('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+  document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on',p.id==='p-'+b.dataset.t));
+  if(b.dataset.t==='trends')renderTrends();
+  if(b.dataset.t==='sectors')renderSectors();
+  if(b.dataset.t==='fund')renderFund();});
+window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);
+  if(h&&h!==DATE&&IDX.dates.includes(h))show(h);});
+boot();
+</script></body></html>
