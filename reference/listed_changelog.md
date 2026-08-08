@@ -2,6 +2,13 @@
 
 Written by `get_listed_securities.py`. Newest first.
 
+## 2026-08-08
+
+**New listings (1)**
+
+- `RSY2` — Reliable Samriddhi Yojana -2 · Life Insurance · Mutual Funds · Active
+
+
 ## 2026-08-06
 
 **New listings (2)**
