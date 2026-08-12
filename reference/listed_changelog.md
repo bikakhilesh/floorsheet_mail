@@ -2,6 +2,13 @@
 
 Written by `get_listed_securities.py`. Newest first.
 
+## 2026-08-12
+
+**New listings (1)**
+
+- `MEPDL` — Mount Everest Power Development Limited · Hydro Power · Equity · Active
+
+
 ## 2026-08-08
 
 **New listings (1)**
