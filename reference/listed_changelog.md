@@ -2,6 +2,13 @@
 
 Written by `get_listed_securities.py`. Newest first.
 
+## 2026-08-13
+
+**New listings (1)**
+
+- `SAPIL` — Sarvottam Paints Industries Limited · Manufacturing And Processing · Equity · Active
+
+
 ## 2026-08-12
 
 **New listings (1)**
