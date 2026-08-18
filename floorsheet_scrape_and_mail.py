@@ -34,13 +34,13 @@ from selenium.common.exceptions import (
 # ── CONFIG ──
 HEADLESS = True
 PARSER = "lxml"
-MAX_VERIFY_ATTEMPTS = 20
+MAX_VERIFY_ATTEMPTS = 90
 # Hard wall-clock ceiling on the verify/retry loop, in seconds. Whichever of
 # MAX_VERIFY_ATTEMPTS / VERIFY_BUDGET_SEC hits first stops the loop. This exists
 # so the job never gets killed by the Actions timeout mid-retry — if that
 # happens, send_mail() never runs and you lose the data AND the alert.
 # Keep this comfortably below (timeout-minutes * 60) in the workflow.
-VERIFY_BUDGET_SEC = 3600
+VERIFY_BUDGET_SEC = 10800
 TOLERANCE_ABS = 100.0
 TOLERANCE_REL = 1e-6
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", tempfile.gettempdir())
