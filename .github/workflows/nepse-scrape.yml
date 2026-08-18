@@ -26,8 +26,8 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    # Must exceed VERIFY_BUDGET_SEC in the script (3600s) plus a final scrape.
-    timeout-minutes: 90
+    # Must exceed VERIFY_BUDGET_SEC in the script (10800s) plus a final scrape.
+    timeout-minutes: 240
 
     steps:
       - uses: actions/checkout@v7
