@@ -2,6 +2,13 @@
 
 Written by `get_listed_securities.py`. Newest first.
 
+## 2026-08-22
+
+**Reclassified (1)**
+
+- `HBLD83` Status: Active → Delisted
+
+
 ## 2026-08-13
 
 **New listings (1)**
