@@ -2,6 +2,13 @@
 
 Written by `get_listed_securities.py`. Newest first.
 
+## 2026-08-26
+
+**Reclassified (1)**
+
+- `NICD83/84` Status: Active → Delisted
+
+
 ## 2026-08-22
 
 **Reclassified (1)**
