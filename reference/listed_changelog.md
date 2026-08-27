@@ -2,6 +2,19 @@
 
 Written by `get_listed_securities.py`. Newest first.
 
+## 2026-08-27
+
+**Reclassified (7)**
+
+- `CLIP` Status: Inactive → Active
+- `HRLP` Status: Inactive → Active
+- `NMB50` Status: Active → Delisted
+- `RNLIP` Status: Inactive → Active
+- `SABBLP` Status: Inactive → Active
+- `SNLIP` Status: Inactive → Active
+- `SWASTIKP` Status: Inactive → Active
+
+
 ## 2026-08-26
 
 **Reclassified (1)**
