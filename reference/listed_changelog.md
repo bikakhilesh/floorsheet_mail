@@ -2,6 +2,16 @@
 
 Written by `get_listed_securities.py`. Newest first.
 
+## 2026-09-04
+
+**Reclassified (2)**
+
+- `WNLB` Status: Active → Suspended
+- `WNLBP` Status: Active → Inactive
+
+_5 contact detail(s) updated._
+
+
 ## 2026-08-27
 
 **Reclassified (7)**
